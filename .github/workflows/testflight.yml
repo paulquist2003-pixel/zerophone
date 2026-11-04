@@ -10,11 +10,14 @@ on:
 
 jobs:
   testflight:
-    runs-on: macos-15
+    runs-on: macos-26
     env:
       BUNDLE_ID: nl.paulquist.zerophone
     steps:
       - uses: actions/checkout@v4
+
+      - name: Xcode-versie tonen
+        run: xcodebuild -version && xcrun --sdk iphoneos --show-sdk-version
 
       - name: Controleren of alle secrets er zijn
         env:

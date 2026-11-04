@@ -10,9 +10,12 @@ on:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
+
+      - name: Xcode-versie tonen
+        run: xcodebuild -version && xcrun --sdk iphoneos --show-sdk-version
 
       - name: XcodeGen installeren
         run: brew install xcodegen
