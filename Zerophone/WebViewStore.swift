@@ -204,8 +204,8 @@ extension WebViewStore: WKUIDelegate {
     }
 
     func webView(_ webView: WKWebView,
-                 requestMediaCapturePermissionFor origin: WKSecurityOrigin,
-                 initiatedByFrame frame: WKFrameInfo,
+                 decideMediaCapturePermissionsFor origin: WKSecurityOrigin,
+                 initiatedBy frame: WKFrameInfo,
                  type: WKMediaCaptureType) async -> WKPermissionDecision {
         currentRules?.isAllowedHost(origin.host) == true ? .prompt : .deny
     }
