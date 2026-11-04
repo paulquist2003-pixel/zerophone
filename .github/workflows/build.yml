@@ -1,11 +1,16 @@
-# Bouwt Zerophone op een Mac van GitHub, zodat je zelf geen Xcode nodig hebt.
-# Resultaat: een ongesigneerde .ipa (onder Actions > run > Artifacts) die je
-# met AltStore en je gratis Apple ID op je iPhone zet.
+# Compileertest: bouwt Zerophone zonder ondertekening op een Mac van GitHub.
+# Draait alleen als de app-code of het projectbestand verandert (niet bij
+# wijzigingen in andere workflows of documentatie), en handmatig.
+# Voor de echte TestFlight-build: zie testflight.yml.
 name: Build IPA
 
 on:
   push:
     branches: [main]
+    paths:
+      - "Zerophone/**"
+      - "project.yml"
+      - ".github/workflows/build.yml"
   workflow_dispatch:
 
 jobs:
