@@ -32,6 +32,15 @@ enum Platform: String, CaseIterable, Identifiable {
     /// stuurt de site je naar de App Store. Daarom laden we Snapchat als desktopsite.
     var usesDesktopSite: Bool { self == .snapchat }
 
+    /// Geen pinch-zoom en geen automatisch inzoomen bij typen (alleen mobiele sites).
+    var locksZoom: Bool { !usesDesktopSite }
+
+    /// Naar beneden trekken om te verversen (alleen mobiele sites).
+    var supportsPullToRefresh: Bool { !usesDesktopSite }
+
+    /// Op deze paden staat verversen uit, zodat het niet botst met scrollen in een chat.
+    var pullToRefreshExcludedPrefixes: [String] { ["/direct/"] }
+
     /// Volledige user agent (alleen voor desktopsites).
     var customUserAgent: String? {
         guard usesDesktopSite else { return nil }

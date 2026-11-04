@@ -37,6 +37,7 @@ struct PlatformScreen: View {
                 }
             }
             .animation(.easeInOut(duration: 0.2), value: store.bannerText)
+            .onAppear { store.loadIfNeeded() }   // Snapchat laadt pas als je de tab opent
     }
 }
 

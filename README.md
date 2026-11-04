@@ -10,7 +10,8 @@ zoeken en profielen blijven werken.
 |---|---|---|
 | Geblokkeerd | Reels-feed, Verkennen-grid, hashtag- en locatiefeeds, voorgestelde posts | Spotlight-feed, Discover |
 | Toegestaan | Feed, Stories, DM's, zoeken, profielen | Chat (Snapchat for Web) |
-| Gedeelde video van een vriend | Bekijken mag, doorswipen niet | Bekijken mag, doorswipen niet |
+| Gedeelde video van een vriend | Bekijken mag, doorswipen niet (ook niet in DM's) | Bekijken mag, doorswipen niet |
+| Profielen en posts | Alleen content van accounts die je volgt (volgpoort) | |
 | Overig | Video's spelen niet automatisch af; externe links openen in Safari; `instagram://`-links worden tegengehouden zodat je niet in de echte app belandt | Zelfde |
 
 ## Installeren via TestFlight (zonder Xcode)
@@ -88,9 +89,31 @@ In fase 2 bouwen we dit in de app zelf (FamilyControls).
 Meta en Snap passen hun websites regelmatig aan. Alle regels staan in
 `Zerophone/Resources/rules.json`; de code hoeft daarvoor niet te veranderen.
 
-Debuggen: start de app vanuit Xcode, open op je Mac **Safari > Ontwikkel > [je iPhone]
-> instagram.com**. In de console kun je `__SV_classify('/reels/')` testen en met de
-elementinspector nieuwe selectors zoeken.
+### Debuggen met Safari Web Inspector (werkt met de TestFlight-build)
+
+De webviews staan in de testfase op inspecteerbaar, dus je hebt geen Xcode nodig.
+
+1. **iPhone:** Instellingen > Apps > Safari > Geavanceerd > zet **Webinspecteur** aan.
+2. **Mac:** Safari > Instellingen > Geavanceerd > zet **Functies voor webontwikkelaars
+   tonen** aan.
+3. Sluit de iPhone met een kabel aan op de Mac en open Zerophone op de iPhone, op de
+   tab die je wilt inspecteren.
+4. Mac Safari: **Ontwikkel > [je iPhone] > Zerophone > instagram.com** (of
+   snapchat.com). Er opent een inspector met elementen, console en netwerk.
+
+In de console van die pagina:
+
+- `window.__SV_classify('/reels/')` geeft terug wat de padregels met een pad doen
+  (`allow`, `block` of `redirect`).
+- `window.__SV_state()` toont het huidige pad, of de volgpoort dicht staat
+  (`gateLocked`), wat de volgstatus is (`relation`: `stranger`, `followed`, `self` of
+  `unknown`), welke videobewaking actief is (`guardMode`: `page`, `overlay` of `null`)
+  en of er al een eerste video is vastgelegd (`hasAnchor`).
+
+Met de elementinspector zoek je nieuwe selectors; zet ze in `rules.json`.
+
+**Voor de App Store:** `isInspectable` staat in `WebViewStore.swift` ook in Release aan.
+Zet dat uit voordat de app naar de App Store gaat.
 
 Later kun je `rules.json` online zetten (bijv. op GitHub) en de URL invullen in
 `RulesStore.remoteURL`; verhoog dan `version` bij elke wijziging. De app haalt de
@@ -119,6 +142,7 @@ Zerophone/
   WebViewStore.swift     de browser + alle blokkeerlogica
   FilterRules.swift      regelmodel en laden (meegeleverd of van server)
   Resources/
-    filter.js            in elke pagina: CSS, tekstregels, routes, klikken
+    filter.js            in elke pagina: CSS, tekstregels, volgpoort, videobewaking,
+                         zoomslot, routes, klikken
     rules.json           selectors en paden per platform
 ```

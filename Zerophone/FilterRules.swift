@@ -7,6 +7,35 @@ struct TextRule: Codable, Hashable {
     let hideClosest: String
 }
 
+/// Videobewaking (filter.js): in een reelviewer mag één video, doorswipen niet.
+/// Alleen doorgegeven aan JS; Swift gebruikt deze velden zelf niet.
+struct VideoGuard: Codable, Hashable {
+    /// Regex's voor pagina's die één losse video zijn (kleine letters, afsluitende "/").
+    let pagePatterns: [String]
+    /// Padvoorvoegsels waar video's in een viewer-overlay openen (bijv. "/direct/").
+    let overlayPathPrefixes: [String]
+    /// Padvoorvoegsels waar de bewaking uit staat (bijv. "/stories/").
+    let exemptPathPrefixes: [String]
+}
+
+/// Volgpoort (filter.js): op profielen en posts van accounts die je niet volgt
+/// wordt de content verborgen. Alleen doorgegeven aan JS.
+struct FollowGate: Codable, Hashable {
+    /// Regex's voor profiel- en postpagina's waarop de poort geldt.
+    let pathPatterns: [String]
+    let exemptPathPrefixes: [String]
+    /// Knopteksten die betekenen "je volgt dit account niet".
+    let followTexts: [String]
+    /// Knopteksten die betekenen "je volgt dit account (of bent het zelf)".
+    let followedTexts: [String]
+    /// Selector die alleen op je eigen profiel voorkomt.
+    let selfSelector: String?
+    let hidePostLinks: [String]
+    let hideAlways: [String]
+    /// Melding die getoond wordt bij een account dat je niet volgt.
+    let message: String
+}
+
 /// Regels per platform. Paden worden genormaliseerd naar kleine letters met een
 /// afsluitende "/", dus "/reels" en "/Reels/" worden allebei "/reels/".
 struct PlatformRules: Codable {
@@ -23,6 +52,8 @@ struct PlatformRules: Codable {
     let singleViewPathPattern: String?
     let hideSelectors: [String]
     let textRules: [TextRule]
+    let videoGuard: VideoGuard?
+    let followGate: FollowGate?
 
     static func normalized(_ path: String) -> String {
         let p = path.isEmpty ? "/" : path.lowercased()
