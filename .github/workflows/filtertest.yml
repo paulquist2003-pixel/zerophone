@@ -1,0 +1,43 @@
+# Filtertests: test filter.js en rules.json in een nagebootste browser (jsdom).
+# Draait op Linux (snel, geen macOS-runner nodig) bij elke push of pull request
+# die de filterlaag of de tests raakt, en handmatig.
+# Lokaal: cd tests && npm ci && npm test
+name: Filtertests
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "Zerophone/Resources/filter.js"
+      - "Zerophone/Resources/rules.json"
+      - "tests/**"
+      - ".github/workflows/filtertest.yml"
+  pull_request:
+    paths:
+      - "Zerophone/Resources/filter.js"
+      - "Zerophone/Resources/rules.json"
+      - "tests/**"
+      - ".github/workflows/filtertest.yml"
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tests/package-lock.json
+
+      - name: Afhankelijkheden installeren
+        run: npm ci --no-audit --no-fund
+
+      - name: Tests draaien
+        run: npm test

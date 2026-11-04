@@ -88,6 +88,8 @@ In fase 2 bouwen we dit in de app zelf (FamilyControls).
 
 Meta en Snap passen hun websites regelmatig aan. Alle regels staan in
 `Zerophone/Resources/rules.json`; de code hoeft daarvoor niet te veranderen.
+Na een wijziging aan `rules.json` of `filter.js` draait de workflow **Filtertests**
+automatisch (lokaal: `cd tests && npm ci && npm test`).
 
 ### Debuggen met Safari Web Inspector (werkt met de TestFlight-build)
 
@@ -130,9 +132,14 @@ nieuwe regels op bij het starten.
 
 ```
 project.yml              XcodeGen-projectdefinitie
+CLAUDE.md                werkregels voor Claude-sessies in deze repo
 .github/workflows/
   testflight.yml         ondertekende build + upload naar TestFlight
   build.yml              snelle ongesigneerde build (compileertest)
+  filtertest.yml         jsdom-tests van filter.js en rules.json (Linux)
+  status.yml             build-status in App Store Connect opvragen
+  tester.yml             TestFlight-tester toevoegen
+tests/                   jsdom-tests: cd tests && npm ci && npm test
 signing/                 scripts voor certificaat en profiel (stap 3 en 4)
 Zerophone/
   Assets.xcassets        app-icoon

@@ -1,0 +1,14 @@
+{
+  "name": "zerophone-filtertests",
+  "private": true,
+  "description": "jsdom-tests voor Zerophone/Resources/filter.js en rules.json",
+  "scripts": {
+    "test": "node filter.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "jsdom": "24.1.3"
+  }
+}
