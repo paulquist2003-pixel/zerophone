@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "platforms": {
     "instagram": {
       "allowedHostSuffixes": ["instagram.com", "facebook.com", "fbcdn.net", "cdninstagram.com"],
@@ -7,7 +7,7 @@
       "redirects": { "/explore/": "/explore/search/" },
       "blockedExactPaths": [],
       "blockedPathPrefixes": ["/reels/", "/explore/"],
-      "singleViewPathPattern": "^/reel/[A-Za-z0-9_-]+/?$",
+      "singleViewPathPattern": "^/([A-Za-z0-9._]+/)?reel/[A-Za-z0-9_-]+/?$",
       "hideSelectors": [
         "a[href='/reels/']",
         "a[href^='/reels/']",
@@ -19,7 +19,30 @@
           "texts": ["Suggested for you", "Voorgesteld voor jou", "Suggested posts", "Voorgestelde berichten", "Suggested reels", "Voorgestelde reels"],
           "hideClosest": "article"
         }
-      ]
+      ],
+      "videoGuard": {
+        "pagePatterns": ["^/([a-z0-9._]+/)?reel/[a-z0-9_-]+/$"],
+        "overlayPathPrefixes": ["/direct/"],
+        "exemptPathPrefixes": ["/stories/"]
+      },
+      "followGate": {
+        "pathPatterns": [
+          "^/[^/]+/$",
+          "^/[^/]+/(reels|tagged)/$",
+          "^/([^/]+/)?(p|reel|tv)/[^/]+/$"
+        ],
+        "exemptPathPrefixes": [
+          "/direct/", "/explore/", "/accounts/", "/stories/", "/reels/", "/about/", "/legal/",
+          "/emails/", "/challenge/", "/session/", "/web/", "/oauth/", "/privacy/", "/developer/",
+          "/press/", "/api/", "/settings/", "/your_activity/", "/notifications/", "/nametag/", "/qr/"
+        ],
+        "followTexts": ["Follow", "Follow back", "Follow Back", "Volgen", "Terugvolgen"],
+        "followedTexts": ["Following", "Requested", "Volgend", "Aangevraagd", "Edit profile", "Profiel bewerken", "Bewerk profiel"],
+        "selfSelector": "a[href^='/accounts/edit']",
+        "hidePostLinks": ["a[href*='/p/']", "a[href*='/reel/']", "a[href*='/tv/']"],
+        "hideAlways": ["a[href*='/stories/']", "a[href$='/reels/']", "a[href$='/tagged/']"],
+        "message": "Alleen content van accounts die je volgt"
+      }
     },
     "snapchat": {
       "allowedHostSuffixes": ["snapchat.com", "snap.com", "sc-cdn.net", "sc-static.net"],
@@ -34,7 +57,12 @@
         "a[href^='/discover']",
         "a[href^='/explore']"
       ],
-      "textRules": []
+      "textRules": [],
+      "videoGuard": {
+        "pagePatterns": ["^/spotlight/[a-z0-9_-]+/$"],
+        "overlayPathPrefixes": [],
+        "exemptPathPrefixes": []
+      }
     }
   }
 }
