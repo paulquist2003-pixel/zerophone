@@ -109,8 +109,11 @@ In de console van die pagina:
   (`allow`, `block` of `redirect`).
 - `window.__SV_state()` toont het huidige pad, of de volgpoort dicht staat
   (`gateLocked`), wat de volgstatus is (`relation`: `stranger`, `followed`, `self` of
-  `unknown`), welke videobewaking actief is (`guardMode`: `page`, `overlay` of `null`)
-  en of er al een eerste video is vastgelegd (`hasAnchor`).
+  `unknown`), welke videobewaking actief is (`guardMode`: `page`, `overlay` of `null`),
+  of er al een eerste video is vastgelegd (`hasAnchor`), of er een scrollcontainer op
+  slot staat (`scrollLocked`) en hoeveel elementen gemaskeerd zijn (`masked`).
+- Gemaskeerde elementen hebben het attribuut `data-sv-masked`. Het element dat op slot
+  staat, heeft in zijn inline stijl `overflow-y: hidden !important`.
 
 Met de elementinspector zoek je nieuwe selectors; zet ze in `rules.json`.
 
@@ -151,7 +154,7 @@ Zerophone/
   WebViewStore.swift     de browser + alle blokkeerlogica
   FilterRules.swift      regelmodel en laden (meegeleverd of van server)
   Resources/
-    filter.js            in elke pagina: CSS, tekstregels, volgpoort, videobewaking,
-                         zoomslot, routes, klikken
+    filter.js            in elke pagina: CSS, tekstregels, volgpoort, videobewaking
+                         (scrollslot, maskeren, terugscrollen), zoomslot, routes, klikken
     rules.json           selectors en paden per platform
 ```

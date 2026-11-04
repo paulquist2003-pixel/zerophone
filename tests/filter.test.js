@@ -458,6 +458,254 @@ async function testVideoGuard() {
   env.close();
 }
 
+// ---------- afscherming: scrollslot en maskeren ----------
+
+function withRect(el, r) {
+  el.getBoundingClientRect = () => r;
+  return el;
+}
+
+// Maakt een element dat zich als scrollcontainer gedraagt (jsdom rekent geen layout uit).
+function scroller(env, id, { scrollHeight = 2400, clientHeight = 800, scrollTop = 0, r = rect(0, 0, 400, 800) } = {}) {
+  const el = env.d.createElement('div');
+  el.id = id;
+  el.style.overflowY = 'auto';
+  Object.defineProperty(el, 'scrollHeight', { configurable: true, get: () => scrollHeight });
+  Object.defineProperty(el, 'clientHeight', { configurable: true, get: () => clientHeight });
+  el.scrollTop = scrollTop;
+  return withRect(el, r);
+}
+
+function slide(env, id, r) {
+  const el = env.d.createElement('div');
+  el.id = id;
+  return withRect(el, r);
+}
+
+function swipe(env, target, dx, dy) {
+  const start = new env.w.Event('touchstart', { bubbles: true, cancelable: true });
+  start.touches = [{ clientX: 200, clientY: 400 }];
+  target.dispatchEvent(start);
+  const move = new env.w.Event('touchmove', { bubbles: true, cancelable: true });
+  move.touches = [{ clientX: 200 + dx, clientY: 400 + dy }];
+  target.dispatchEvent(move);
+  return move.defaultPrevented;
+}
+
+function isMasked(el) {
+  return el.getAttribute('data-sv-masked') === '1' && el.style.getPropertyValue('visibility') === 'hidden' && el.style.getPropertyValue('pointer-events') === 'none';
+}
+
+// Reelpagina met een scrollcontainer en drie slides: anker, volgende video, miniatuur zonder video.
+async function reelPage(url = 'https://www.instagram.com/reel/A/', platform = 'instagram') {
+  const env = makeEnv({ platform, url, html: '', lockZoom: platform === 'instagram' });
+  const sc = scroller(env, 'sc');
+  const s1 = slide(env, 's1', rect(0, 0, 400, 800));
+  const s2 = slide(env, 's2', rect(0, 800, 400, 800));
+  const s3 = slide(env, 's3', rect(0, 1600, 400, 800));
+  const A = makeVideo(env, rect(0, 0, 400, 800));
+  const B = makeVideo(env, rect(0, 800, 400, 800));
+  s1.appendChild(A); s2.appendChild(B); s3.appendChild(env.d.createElement('img'));
+  sc.append(s1, s2, s3);
+  env.d.body.appendChild(sc);
+  await sleep(350);
+  env.fire(A);
+  return { env, sc, s1, s2, s3, A, B };
+}
+
+async function testProtection() {
+  console.log('\n[afscherming: scrollslot en maskeren]');
+
+  // --- reelpagina met scrollcontainer
+  let { env, sc, s1, s2, s3, A, B } = await reelPage();
+  check('reel: scrollcontainer op slot (overflow-y hidden !important)', sc.style.getPropertyValue('overflow-y') === 'hidden' && sc.style.getPropertyPriority('overflow-y') === 'important', sc.getAttribute('style'));
+  check('reel: overscroll-behavior none', sc.style.getPropertyValue('overscroll-behavior') === 'none');
+  check('reel: state scrollLocked', env.w.__SV_state().scrollLocked === true, env.w.__SV_state());
+  check('reel: slide met volgende video gemaskeerd (onzichtbaar, niet aan te tikken)', isMasked(s2), s2.getAttribute('style'));
+  check('reel: slide met alleen miniatuur ook gemaskeerd', isMasked(s3), s3.getAttribute('style'));
+  check('reel: slide van de geopende video niet gemaskeerd', !s1.hasAttribute('data-sv-masked') && !A.hasAttribute('data-sv-masked'));
+  check('reel: volgende video stil (gedempt, preload none, geen pause-aanroep nodig)', B.muted === true && B.preload === 'none' && B.__paused === 0, { m: B.muted, p: B.preload, n: B.__paused });
+  check('reel: geopende video niet gedempt', A.muted === false);
+  check('reel: geen swipeBlocked-bericht door alleen maskeren', env.byType('swipeBlocked').length === 0, env.messages);
+
+  check('reel: veeg omhoog (volgende) tegengehouden', swipe(env, A, 0, -60) === true);
+  check('reel: veeg omlaag ook tegengehouden', swipe(env, A, 0, 60) === true);
+  check('reel: opzij vegen mag', swipe(env, A, -80, -10) === false);
+  check('reel: heel kleine beweging (tik) niet tegengehouden', swipe(env, A, 0, -2) === false);
+
+  // Binnenvak dat zelf scrolt (reacties) blijft werken
+  const comments = scroller(env, 'comments', { scrollHeight: 1200, clientHeight: 300, r: rect(0, 500, 400, 300) });
+  const line = env.d.createElement('p'); comments.appendChild(line);
+  s1.appendChild(comments);
+  check('reel: scrollend binnenvak (reacties) mag scrollen', swipe(env, line, 0, -60) === false);
+  comments.scrollTop = 900; // onderaan
+  check('reel: binnenvak onderaan -> veeg omhoog weer tegengehouden', swipe(env, line, 0, -60) === true);
+
+  // Later toegevoegde slide wordt ook gemaskeerd
+  const s4 = slide(env, 's4', rect(0, 2400, 400, 800));
+  const C = makeVideo(env, rect(0, 2400, 400, 800));
+  s4.appendChild(C); sc.appendChild(s4);
+  await sleep(250);
+  check('reel: later geladen slide gemaskeerd', isMasked(s4) && C.muted === true, s4.getAttribute('style'));
+
+  // Vangnet blijft: als de volgende video toch in beeld komt
+  env.fire(B);
+  check('reel: vangnet blijft (pause + swipeBlocked + terugscrollen)', B.__paused === 1 && env.byType('swipeBlocked').length === 1 && A.__scrolled === 1, { p: B.__paused, m: env.messages, s: A.__scrolled });
+
+  // Andere pagina: alles eraf
+  env.go('/');
+  await sleep(50);
+  check('naar feed: slot eraf (eigen overflow-y auto terug)', sc.style.getPropertyValue('overflow-y') === 'auto' && sc.style.getPropertyPriority('overflow-y') === '' && sc.style.getPropertyValue('overscroll-behavior') === '', sc.getAttribute('style'));
+  check('naar feed: maskers eraf', !s2.hasAttribute('data-sv-masked') && s2.style.getPropertyValue('visibility') === '' && s3.style.getPropertyValue('pointer-events') === '' && !s4.hasAttribute('data-sv-masked'));
+  check('naar feed: state ontgrendeld', env.w.__SV_state().scrollLocked === false && env.w.__SV_state().masked === 0, env.w.__SV_state());
+  check('naar feed: vegen niet meer tegengehouden (luisteraar weg)', swipe(env, A, 0, -60) === false);
+  env.close();
+
+  // --- bestaande inline stijl wordt hersteld
+  ({ env, sc, s2 } = await (async () => {
+    const env = makeEnv({ url: 'https://www.instagram.com/reel/A/', html: '' });
+    const sc = scroller(env, 'sc');
+    const s1 = slide(env, 's1', rect(0, 0, 400, 800));
+    const s2 = slide(env, 's2', rect(0, 800, 400, 800));
+    s2.style.setProperty('visibility', 'visible');
+    const A = makeVideo(env, rect(0, 0, 400, 800));
+    const B = makeVideo(env, rect(0, 800, 400, 800));
+    s1.appendChild(A); s2.appendChild(B); sc.append(s1, s2);
+    env.d.body.appendChild(sc);
+    await sleep(350);
+    env.fire(A);
+    return { env, sc, s2 };
+  })());
+  check('eigen inline stijl: tijdens slot overschreven', s2.style.getPropertyValue('visibility') === 'hidden');
+  env.go('/alice/');
+  await sleep(50);
+  check('eigen inline stijl: na vrijgeven terug naar visible', s2.style.getPropertyValue('visibility') === 'visible', s2.getAttribute('style'));
+  env.close();
+
+  // --- reelpagina zonder herkenbare scrollcontainer: hele pagina op slot
+  env = makeEnv({ url: 'https://www.instagram.com/reel/A/', html: '' });
+  A = makeVideo(env, rect(0, 0, 400, 800));
+  B = makeVideo(env, rect(0, 800, 400, 800));
+  env.d.body.append(A, B);
+  await sleep(350);
+  env.fire(A);
+  const root = env.d.documentElement;
+  check('geen container: documentElement op slot', root.style.getPropertyValue('overflow-y') === 'hidden', root.getAttribute('style'));
+  check('geen container: volgende video zelf gemaskeerd', isMasked(B));
+  check('geen container: body niet gemaskeerd', !env.d.body.hasAttribute('data-sv-masked'));
+  env.go('/');
+  await sleep(50);
+  check('geen container: na verlaten weer los', root.style.getPropertyValue('overflow-y') === '', root.getAttribute('style'));
+  env.close();
+
+  // --- gedeelde wrapper: nooit iets maskeren dat de geopende video bevat
+  env = makeEnv({ url: 'https://www.instagram.com/reel/A/', html: '' });
+  sc = scroller(env, 'sc');
+  const wrap = slide(env, 'wrap', rect(0, 0, 400, 1600));
+  A = makeVideo(env, rect(0, 0, 400, 800));
+  B = makeVideo(env, rect(0, 800, 400, 800));
+  wrap.append(A, B); sc.appendChild(wrap); env.d.body.appendChild(sc);
+  await sleep(350);
+  env.fire(A);
+  check('gedeelde wrapper: wrapper niet gemaskeerd, volgende video wel', !wrap.hasAttribute('data-sv-masked') && isMasked(B) && !A.hasAttribute('data-sv-masked'));
+  env.close();
+
+  // --- carrousel: video ernaast blijft zichtbaar
+  env = makeEnv({ url: 'https://www.instagram.com/reel/A/', html: '' });
+  A = makeVideo(env, rect(0, 0, 400, 800));
+  B = makeVideo(env, rect(400, 0, 400, 800));
+  env.d.body.append(A, B);
+  await sleep(350);
+  env.fire(A);
+  check('carrousel: video ernaast niet gemaskeerd en niet gedempt', !B.hasAttribute('data-sv-masked') && B.muted === false);
+  env.close();
+
+  // --- DM-viewer (schermvullend, eigen scrollcontainer)
+  env = makeEnv({ url: 'https://www.instagram.com/direct/t/123/', html: '' });
+  const chat = scroller(env, 'chat', { r: rect(0, 0, 400, 800) });
+  chat.appendChild(env.d.createElement('p'));
+  const viewer = scroller(env, 'viewer');
+  const v1 = slide(env, 'v1', rect(0, 0, 400, 800));
+  const v2 = slide(env, 'v2', rect(0, 800, 400, 800));
+  const W1 = makeVideo(env, rect(0, 0, 400, 800));
+  const W2 = makeVideo(env, rect(0, 800, 400, 800));
+  v1.appendChild(W1); v2.appendChild(W2); viewer.append(v1, v2);
+  env.d.body.append(chat, viewer);
+  await sleep(350);
+  env.fire(W1);
+  check('DM-viewer: viewer op slot', viewer.style.getPropertyValue('overflow-y') === 'hidden' && env.w.__SV_state().scrollLocked === true, env.w.__SV_state());
+  check('DM-viewer: chat zelf niet op slot of gemaskeerd', chat.style.getPropertyValue('overflow-y') === 'auto' && !chat.hasAttribute('data-sv-masked'));
+  check('DM-viewer: volgende reel gemaskeerd', isMasked(v2));
+  check('DM-viewer: veeg omhoog (volgende) tegengehouden', swipe(env, W1, 0, -60) === true);
+  check('DM-viewer: veeg omlaag (sluiten) mag', swipe(env, W1, 0, 60) === false);
+  check('DM-viewer: vegen in de chat ernaast niet tegengehouden', swipe(env, chat.firstChild, 0, -60) === false);
+  env.fire(W1, { visible: false }); // viewer dicht
+  await sleep(150);
+  check('DM-viewer: kort na sluiten nog afgeschermd', env.w.__SV_state().scrollLocked === true);
+  await sleep(400);
+  check('DM-viewer: na sluiten slot en maskers eraf', viewer.style.getPropertyValue('overflow-y') === 'auto' && !v2.hasAttribute('data-sv-masked') && env.w.__SV_state().masked === 0, env.w.__SV_state());
+  env.close();
+
+  // --- DM-viewer verdwijnt uit de pagina: direct vrijgeven
+  env = makeEnv({ url: 'https://www.instagram.com/direct/t/123/', html: '' });
+  const vw = scroller(env, 'viewer');
+  const X1 = makeVideo(env, rect(0, 0, 400, 800));
+  const X2 = makeVideo(env, rect(0, 800, 400, 800));
+  vw.append(X1, X2); env.d.body.appendChild(vw);
+  await sleep(350);
+  env.fire(X1);
+  check('viewer verwijderd: eerst op slot', env.w.__SV_state().scrollLocked === true);
+  vw.remove();
+  env.d.body.appendChild(env.d.createElement('div')); // DOM-wijziging
+  await sleep(250);
+  check('viewer verwijderd: slot en maskers eraf', env.w.__SV_state().scrollLocked === false && env.w.__SV_state().masked === 0, env.w.__SV_state());
+  env.close();
+
+  // --- hoge video in de chat zelf (geen schermvullende viewer): chat blijft scrollen
+  env = makeEnv({ url: 'https://www.instagram.com/direct/t/123/', html: '' });
+  const list = scroller(env, 'list');
+  const Y1 = makeVideo(env, rect(0, 100, 400, 500));
+  list.appendChild(Y1); env.d.body.appendChild(list);
+  await sleep(350);
+  env.fire(Y1);
+  check('hoge video in chat (500 px): geen slot op de chat', list.style.getPropertyValue('overflow-y') === 'auto' && env.w.__SV_state().scrollLocked === false, env.w.__SV_state());
+  check('hoge video in chat: vegen in chat mag', swipe(env, Y1, 0, -60) === false);
+  env.close();
+
+  // --- DM zonder scrollcontainer: geen slot, wel maskeren van de video eronder
+  env = makeEnv({ url: 'https://www.instagram.com/direct/t/123/', html: '' });
+  const Z1 = makeVideo(env, rect(0, 0, 400, 800));
+  const Z2 = makeVideo(env, rect(0, 800, 400, 800));
+  env.d.body.append(Z1, Z2);
+  await sleep(350);
+  env.fire(Z1);
+  check('DM zonder container: geen slot', env.w.__SV_state().scrollLocked === false && env.d.documentElement.style.getPropertyValue('overflow-y') === '');
+  check('DM zonder container: video eronder wel gemaskeerd', isMasked(Z2));
+  env.close();
+
+  // --- feed en profielen: nooit afscherming
+  for (const p of ['/', '/alice/', '/stories/alice/1/']) {
+    env = makeEnv({ url: 'https://www.instagram.com' + p, html: '' });
+    const f = scroller(env, 'f');
+    const F1 = makeVideo(env, rect(0, 0, 400, 800));
+    const F2 = makeVideo(env, rect(0, 800, 400, 800));
+    f.append(F1, F2); env.d.body.appendChild(f);
+    await sleep(350);
+    env.fire(F1); env.fire(F2);
+    check(`${p}: geen slot en geen maskers`, f.style.getPropertyValue('overflow-y') === 'auto' && !F2.hasAttribute('data-sv-masked') && env.w.__SV_state().masked === 0 && swipe(env, F1, 0, -60) === false);
+    env.close();
+  }
+
+  // --- Snapchat Spotlight-video krijgt dezelfde afscherming
+  ({ env, sc, s2 } = await reelPage('https://www.snapchat.com/spotlight/abc123/', 'snapchat'));
+  check('Snapchat /spotlight/x/: slot en masker', sc.style.getPropertyValue('overflow-y') === 'hidden' && isMasked(s2));
+  // Geen volgpoort op Snapchat, dus geen DOM-wijziging na de routewissel: de routewissel zelf moet vrijgeven.
+  env.go('/web/');
+  await sleep(30);
+  check('Snapchat: routewissel zonder DOM-wijziging geeft direct vrij', sc.style.getPropertyValue('overflow-y') === 'auto' && !s2.hasAttribute('data-sv-masked'), sc.getAttribute('style'));
+  env.close();
+}
+
 async function testRulesContract() {
   console.log('\n[rules.json tegenover de Swift-structs]');
   // Verplichte sleutels (niet-optionele Codable-velden); ontbreekt er één, dan faalt het decoderen -> fatalError bij start.
@@ -498,6 +746,7 @@ async function testRulesContract() {
   await testZoomLock();
   await testFollowGate();
   await testVideoGuard();
+  await testProtection();
   console.log(`\n${passed} geslaagd, ${failures.length} mislukt`);
   if (failures.length) { console.log('Mislukt:\n - ' + failures.join('\n - ')); process.exit(1); }
   process.exit(0);

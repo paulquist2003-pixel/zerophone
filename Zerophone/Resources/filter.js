@@ -7,6 +7,7 @@
 //  2. Tekstregels: verbergt bijv. "Voorgesteld voor jou"-posts (alleen nieuwe DOM-knopen)
 //  3. Volgpoort: op profielen/posts van accounts die je niet volgt geen content
 //  4. Videobewaking: in een reelviewer mag één video, doorswipen niet
+//     4b. Afscherming: scrollslot en maskeren, zodat de volgende video niet eens in beeld komt
 //  5. Routes en klikken op geblokkeerde links doorgeven aan Swift
 (function () {
   'use strict';
@@ -20,6 +21,9 @@
   var GATE_PENDING_MS = 2500;  // zo lang content verbergen zolang de volgstatus onbekend is
   var RECENT_MS = 400;         // "net nog in beeld" voor de videobewaking
   var POST_THROTTLE_MS = 1500;
+  var LOCK_MIN_OVERLAY = 0.85; // in DM's alleen een (bijna) schermvullende viewer op slot zetten
+  var MAX_DEPTH = 12;          // zo ver omhoog zoeken naar slides rond de geopende video
+  var MIN_MOVE_PX = 4;         // kleinere vingerbewegingen zijn nog geen veeg
 
   // ---------- hulpfuncties ----------
 
@@ -251,11 +255,16 @@
     guard.blocked = new WeakSet();
     guard.visible = new Set();
     guard.lastSeen = 0;
+    releaseProtection();
+  }
+
+  function viewportH() {
+    return window.innerHeight || document.documentElement.clientHeight || 0;
   }
 
   // Alleen schermvullende video's tellen; voorvertoningen in een chat niet.
   function isTall(rect) {
-    var h = window.innerHeight || document.documentElement.clientHeight || 0;
+    var h = viewportH();
     return h > 0 && rect.height >= h * 0.5;
   }
 
@@ -274,10 +283,11 @@
     return Math.abs(rect.left - r.left) > Math.abs(rect.top - r.top);
   }
 
-  function setAnchor(v) {
+  function setAnchor(v, mode) {
     guard.anchor = v;
     guard.blocked = new WeakSet();
     guard.visible = new Set([v]);
+    applyProtection(mode);
   }
 
   function stopVideo(v) {
@@ -288,6 +298,7 @@
     var a = guard.anchor;
     var leave = !(a && a.isConnected);
     if (!leave) {
+      if (prot.anchor === a) mask(slideOf(v));
       try { a.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (e) {}
     }
     var now = Date.now();
@@ -298,13 +309,13 @@
   }
 
   function consider(v, mode, rect) {
-    if (v === guard.anchor) { guard.visible.add(v); return; }
+    if (v === guard.anchor) { guard.visible.add(v); applyProtection(mode); return; }
     if (guard.blocked.has(v)) { stopVideo(v); return; }
-    if (!guard.anchor) { setAnchor(v); return; }
+    if (!guard.anchor) { setAnchor(v, mode); return; }
 
     var swipe = mode === 'page' || (guard.anchor.isConnected && guardedRecently());
     if (swipe && isHorizontalMove(rect)) swipe = false; // opzij bladeren (carrousel) mag
-    if (swipe) stopVideo(v); else setAnchor(v);
+    if (swipe) stopVideo(v); else setAnchor(v, mode);
   }
 
   function onIntersect(entries) {
@@ -315,6 +326,8 @@
       var v = e.target;
       if (!e.isIntersecting || e.intersectionRatio === 0) {
         if (guard.visible.delete(v)) guard.lastSeen = Date.now();
+        // DM-viewer dicht of weggeveegd: afscherming na korte tijd opheffen.
+        if (v === guard.anchor && mode === 'overlay') scheduleRelease();
         continue;
       }
       if (!mode || !isTall(e.boundingClientRect)) continue;
@@ -350,13 +363,234 @@
     }, true);
   }
 
+  // ---------- 4b. Afscherming rond de geopende video ----------
+  // Preventief, zodat de volgende video niet eens even in beeld komt:
+  //  - scrollslot: de scrollcontainer van de geopende video kan niet verticaal scrollen
+  //    (overflow dicht plus touchmove tegenhouden). In de DM-viewer mag de vinger omlaag
+  //    (sluiten), alleen omhoog (volgende) is dicht. Een binnenvak dat zelf scrolt
+  //    (bijv. reacties) blijft werken.
+  //  - maskeren: andere video's en slides boven of onder de geopende video zijn onzichtbaar,
+  //    niet aan te tikken en stil. Opzij (carrousel) blijft zichtbaar.
+  // Het terugscrollen in stopVideo blijft het vangnet als dit toch lekt.
+
+  var prot = { anchor: null, mode: null, lockEl: null, lockPrev: null, masked: [], releaseTimer: null };
+  var touch = null;
+
+  function canScrollY(el) {
+    var cs;
+    try { cs = window.getComputedStyle(el); } catch (e) { return false; }
+    var o = cs && cs.overflowY;
+    return (o === 'auto' || o === 'scroll' || o === 'overlay') && el.scrollHeight > el.clientHeight + 1;
+  }
+
+  function scrollContainerOf(v) {
+    for (var el = v.parentElement; el && el !== document.body && el !== document.documentElement; el = el.parentElement) {
+      if (canScrollY(el)) return el;
+    }
+    return null;
+  }
+
+  // Boven of onder de geopende video (niet ernaast) en niet op dezelfde plek.
+  function verticallyApart(el, ar) {
+    var r = el.getBoundingClientRect();
+    if (!r || (r.width === 0 && r.height === 0)) return false;
+    var dy = Math.abs(r.top - ar.top);
+    return dy > 1 && dy > Math.abs(r.left - ar.left);
+  }
+
+  // Binnen dit element blijft het maskeren: in DM's de viewer, op een reelpagina de hele pagina.
+  function maskBound() {
+    if (prot.lockEl && prot.lockEl !== document.documentElement && prot.lockEl !== document.body) return prot.lockEl;
+    return prot.mode === 'page' ? document.body : null;
+  }
+
+  // Het grootste stuk rond v dat de geopende video niet bevat (de "slide" van v).
+  function slideOf(v) {
+    var a = prot.anchor;
+    var bound = maskBound();
+    if (!a || !bound || !bound.contains(v)) return v;
+    var el = v;
+    while (el.parentElement && el.parentElement !== bound && !el.parentElement.contains(a)) el = el.parentElement;
+    return el;
+  }
+
+  function saveProp(el, name) {
+    return { v: el.style.getPropertyValue(name), p: el.style.getPropertyPriority(name) };
+  }
+
+  function restoreProp(el, name, saved) {
+    if (saved && saved.v) el.style.setProperty(name, saved.v, saved.p);
+    else el.style.removeProperty(name);
+  }
+
+  function mask(el) {
+    if (!el || el.nodeType !== 1 || el.hasAttribute('data-sv-masked')) return;
+    if (prot.anchor && el.contains(prot.anchor)) return; // nooit de geopende video zelf
+    el.setAttribute('data-sv-masked', '1');
+    prot.masked.push({ el: el, vis: saveProp(el, 'visibility'), pe: saveProp(el, 'pointer-events') });
+    el.style.setProperty('visibility', 'hidden', 'important');
+    el.style.setProperty('pointer-events', 'none', 'important');
+  }
+
+  function unmaskAll() {
+    prot.masked.forEach(function (m) {
+      m.el.removeAttribute('data-sv-masked');
+      restoreProp(m.el, 'visibility', m.vis);
+      restoreProp(m.el, 'pointer-events', m.pe);
+    });
+    prot.masked = [];
+  }
+
+  function quiet(v) {
+    try { if (!v.paused) v.pause(); } catch (e) {}
+    v.muted = true;
+    v.removeAttribute('autoplay');
+    try { v.preload = 'none'; } catch (e) {}
+  }
+
+  // Slides zonder video (nog alleen een miniatuur): hoge broers boven of onder het anker.
+  function maskSiblingSlides(ar) {
+    var bound = maskBound();
+    if (!bound) return;
+    var h = viewportH();
+    var el = prot.anchor;
+    for (var d = 0; d < MAX_DEPTH && el && el !== bound; d++) {
+      var parent = el.parentElement;
+      if (!parent || parent === document.body || parent === document.documentElement) break;
+      var sibs = parent.children;
+      for (var i = 0; i < sibs.length; i++) {
+        var s = sibs[i];
+        if (s === el || s.contains(prot.anchor)) continue;
+        if (s.getBoundingClientRect().height >= h * 0.5 && verticallyApart(s, ar)) mask(s);
+      }
+      if (parent === bound) break;
+      el = parent;
+    }
+  }
+
+  function refreshMasks() {
+    var a = prot.anchor;
+    if (!a || !a.isConnected) return;
+    var ar = a.getBoundingClientRect();
+    var vids = document.getElementsByTagName('video');
+    for (var i = 0; i < vids.length; i++) {
+      var v = vids[i];
+      if (v === a) continue;
+      if (prot.mode === 'overlay' && !isTall(v.getBoundingClientRect())) continue;
+      if (!verticallyApart(v, ar)) continue;
+      quiet(v);
+      mask(slideOf(v));
+    }
+    maskSiblingSlides(ar);
+  }
+
+  function lockScroll(a, mode) {
+    var c = scrollContainerOf(a);
+    if (mode === 'overlay') {
+      // Alleen een (bijna) schermvullende viewer; een hoge video in de chat zelf niet,
+      // anders zou de chat niet meer scrollen.
+      if (!c || a.getBoundingClientRect().height < viewportH() * LOCK_MIN_OVERLAY) return;
+    } else if (!c) {
+      c = document.scrollingElement || document.documentElement;
+    }
+    prot.lockEl = c;
+    prot.lockPrev = { o: saveProp(c, 'overflow-y'), ob: saveProp(c, 'overscroll-behavior') };
+    c.style.setProperty('overflow-y', 'hidden', 'important');
+    c.style.setProperty('overscroll-behavior', 'none', 'important');
+    listenTouches(true);
+  }
+
+  function applyProtection(mode) {
+    var a = guard.anchor;
+    if (!mode || !a || !a.isConnected) return;
+    if (prot.releaseTimer) { clearTimeout(prot.releaseTimer); prot.releaseTimer = null; }
+    if (prot.anchor !== a) {
+      releaseProtection();
+      prot.anchor = a;
+      prot.mode = mode;
+      lockScroll(a, mode);
+    }
+    refreshMasks();
+  }
+
+  function releaseProtection() {
+    if (prot.releaseTimer) { clearTimeout(prot.releaseTimer); prot.releaseTimer = null; }
+    if (prot.lockEl) {
+      restoreProp(prot.lockEl, 'overflow-y', prot.lockPrev.o);
+      restoreProp(prot.lockEl, 'overscroll-behavior', prot.lockPrev.ob);
+      prot.lockEl = null;
+      prot.lockPrev = null;
+      listenTouches(false);
+    }
+    unmaskAll();
+    prot.anchor = null;
+    prot.mode = null;
+    touch = null;
+  }
+
+  function scheduleRelease() {
+    if (prot.releaseTimer || !prot.anchor) return;
+    prot.releaseTimer = setTimeout(function () {
+      prot.releaseTimer = null;
+      if (guard.anchor && guard.visible.has(guard.anchor)) return;
+      releaseProtection();
+    }, RECENT_MS + 50);
+  }
+
+  // Na DOM-wijzigingen: nieuwe slides maskeren, of opheffen als de video weg is.
+  function maintainProtection() {
+    if (!prot.anchor) return;
+    if (!prot.anchor.isConnected || !guardMode()) { releaseProtection(); return; }
+    refreshMasks();
+  }
+
+  // Kan een binnenvak tussen el en stop zelf in deze richting scrollen (bijv. reacties)?
+  function innerScrollable(el, stop, dy) {
+    for (; el && el !== stop && el.nodeType === 1; el = el.parentElement) {
+      if (!canScrollY(el)) continue;
+      if (dy < 0 ? el.scrollTop + el.clientHeight < el.scrollHeight - 1 : el.scrollTop > 0) return true;
+    }
+    return false;
+  }
+
+  function onTouchStart(e) {
+    var t = e.touches && e.touches[0];
+    touch = t && e.touches.length === 1 ? { x: t.clientX, y: t.clientY, target: e.target } : null;
+  }
+
+  function onTouchMove(e) {
+    var c = prot.lockEl;
+    if (!c || !touch || !e.cancelable) return;
+    if (!c.isConnected) { releaseProtection(); return; }
+    var t = e.touches && e.touches[0];
+    if (!t) return;
+    var dx = t.clientX - touch.x;
+    var dy = t.clientY - touch.y;
+    if (Math.abs(dy) < MIN_MOVE_PX || Math.abs(dx) >= Math.abs(dy)) return; // horizontaal mag
+    if (prot.mode === 'overlay' && dy > 0) return; // vinger omlaag: viewer sluiten mag
+    var target = touch.target && touch.target.nodeType === 1 ? touch.target : (touch.target && touch.target.parentElement);
+    if (!target || !c.contains(target)) return;
+    if (innerScrollable(target, c, dy)) return;
+    e.preventDefault();
+  }
+
+  // Alleen luisteren zolang er iets op slot zit: een niet-passieve touchmove maakt
+  // scrollen elders (zoals de feed) anders trager.
+  function listenTouches(on) {
+    var f = on ? 'addEventListener' : 'removeEventListener';
+    document[f]('touchstart', onTouchStart, { capture: true, passive: true });
+    document[f]('touchmove', onTouchMove, { capture: true, passive: false });
+  }
+
   window.__SV_state = function () {
     return {
       path: location.pathname,
       gateLocked: gate.lockKey,
       relation: fg ? relationState() : null,
       guardMode: vg ? guardMode() : null,
-      hasAnchor: !!guard.anchor
+      hasAnchor: !!guard.anchor,
+      scrollLocked: !!prot.lockEl,
+      masked: prot.masked.length
     };
   };
 
@@ -401,6 +635,7 @@
     }
     report();
     updateFollowGate();
+    maintainProtection();
   }
 
   // ---------- 5. Routes en klikken ----------
@@ -415,6 +650,8 @@
   function onRouteChange() {
     report();
     updateFollowGate();
+    // Andere pagina: slot en maskers direct eraf, anders blijft bijv. de feed op slot staan.
+    if (vg) resetGuardIfMoved();
   }
 
   ['pushState', 'replaceState'].forEach(function (name) {
