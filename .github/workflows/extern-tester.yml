@@ -64,7 +64,7 @@ jobs:
         run: |
           import json, os, sys, time, jwt, requests
 
-          # Invoer uit het event-bestand lezen (niet via env of ${{ }}, zodat de waarden
+          # Invoer uit het event-bestand lezen (niet via env of een expressie, zodat de waarden
           # niet in de stapkop van het log verschijnen) en gevoelige velden maskeren.
           with open(os.environ["GITHUB_EVENT_PATH"]) as f:
               inp = json.load(f).get("inputs", {}) or {}
