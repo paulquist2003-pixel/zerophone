@@ -1,0 +1,77 @@
+# Maakt (als die nog niet bestaat) een interne TestFlight-groep met toegang tot alle
+# builds en voegt een tester toe. Interne testers moeten gebruiker zijn in je
+# App Store Connect-team (de accounthouder is dat altijd).
+name: TestFlight-tester toevoegen
+
+on:
+  workflow_dispatch:
+    inputs:
+      email:
+        description: "Apple ID (e-mailadres) van de tester"
+        required: true
+      groep:
+        description: "Naam van de interne groep"
+        required: true
+        default: "Intern"
+
+jobs:
+  tester:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Python-pakketten installeren
+        run: pip install --quiet pyjwt cryptography requests
+
+      - name: Groep en tester instellen
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          TESTER_EMAIL: ${{ inputs.email }}
+          GROUP_NAME: ${{ inputs.groep }}
+        shell: python
+        run: |
+          import os, time, jwt, requests
+
+          token = jwt.encode(
+              {"iss": os.environ["ASC_ISSUER_ID"], "iat": int(time.time()),
+               "exp": int(time.time()) + 600, "aud": "appstoreconnect-v1"},
+              os.environ["ASC_KEY_P8"], algorithm="ES256",
+              headers={"kid": os.environ["ASC_KEY_ID"], "typ": "JWT"})
+          H = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+          API = "https://api.appstoreconnect.apple.com/v1"
+          email = os.environ["TESTER_EMAIL"].strip().lower()
+          group_name = os.environ["GROUP_NAME"].strip()
+
+          def call(method, path, **kw):
+              r = requests.request(method, API + path, headers=H, timeout=30, **kw)
+              if r.status_code >= 400:
+                  print(f"FOUT {r.status_code} bij {method} {path}: {r.text[:800]}")
+                  r.raise_for_status()
+              return r.json() if r.text else {}
+
+          app_id = call("GET", "/apps", params={"filter[bundleId]": "nl.paulquist.zerophone"})["data"][0]["id"]
+
+          groups = call("GET", f"/apps/{app_id}/betaGroups")["data"]
+          group = next((g for g in groups if g["attributes"]["name"] == group_name), None)
+          if group:
+              print(f"Groep '{group_name}' bestaat al")
+          else:
+              group = call("POST", "/betaGroups", json={"data": {
+                  "type": "betaGroups",
+                  "attributes": {"name": group_name, "isInternalGroup": True,
+                                 "hasAccessToAllBuilds": True},
+                  "relationships": {"app": {"data": {"type": "apps", "id": app_id}}}}})["data"]
+              print(f"Interne groep '{group_name}' aangemaakt")
+
+          existing = call("GET", "/betaTesters", params={"filter[email]": email})["data"]
+          if existing:
+              tester_id = existing[0]["id"]
+              call("POST", f"/betaGroups/{group['id']}/relationships/betaTesters",
+                   json={"data": [{"type": "betaTesters", "id": tester_id}]})
+              print(f"Bestaande tester {email} aan de groep toegevoegd")
+          else:
+              call("POST", "/betaTesters", json={"data": {
+                  "type": "betaTesters",
+                  "attributes": {"email": email},
+                  "relationships": {"betaGroups": {"data": [{"type": "betaGroups", "id": group["id"]}]}}}})
+              print(f"Tester {email} toegevoegd; Apple stuurt een uitnodiging")
