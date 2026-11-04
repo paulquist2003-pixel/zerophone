@@ -1,0 +1,263 @@
+# Externe TestFlight-testers (bijv. vrienden) uitnodigen.
+# Modus:
+#   controleren  - leest alleen de huidige stand uit en toont wat er zou gebeuren
+#   klaarzetten  - externe groep, testinformatie, beoordelingsgegevens, build in de groep,
+#                  tester in de groep (nog niet indienen bij Apple)
+#   indienen     - als klaarzetten, en de build indienen voor Beta App Review
+# Een tester krijgt de uitnodigingsmail pas als Apple de build heeft goedgekeurd.
+# Persoonlijke gegevens (e-mail tester, telefoonnummer) worden in de logs gemaskeerd;
+# de repo is openbaar. Teksten staan in docs/app-store.md (disclaimer).
+name: TestFlight extern
+
+on:
+  workflow_dispatch:
+    inputs:
+      modus:
+        description: "controleren, klaarzetten of indienen"
+        required: true
+        default: "controleren"
+        type: choice
+        options: [controleren, klaarzetten, indienen]
+      email:
+        description: "E-mailadres van de externe tester (leeg = geen tester toevoegen)"
+        required: false
+        default: ""
+      groep:
+        description: "Naam van de externe groep"
+        required: true
+        default: "Vrienden"
+      build:
+        description: "Buildnummer (leeg = nieuwste verwerkte build)"
+        required: false
+        default: ""
+      contact_phone:
+        description: "Telefoonnummer contactpersoon voor Apple (nodig bij indienen)"
+        required: false
+        default: ""
+      contact_first:
+        description: "Voornaam contactpersoon"
+        required: true
+        default: "Leendert Paulus"
+      contact_last:
+        description: "Achternaam contactpersoon"
+        required: true
+        default: "Quist"
+      contact_email:
+        description: "E-mail contactpersoon en feedbackadres"
+        required: true
+        default: "paulquist2003@gmail.com"
+
+jobs:
+  extern:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Python-pakketten installeren
+        run: pip install --quiet pyjwt cryptography requests
+
+      - name: Externe test instellen
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        shell: python
+        run: |
+          import json, os, sys, time, jwt, requests
+
+          # Invoer uit het event-bestand lezen (niet via env of ${{ }}, zodat de waarden
+          # niet in de stapkop van het log verschijnen) en gevoelige velden maskeren.
+          with open(os.environ["GITHUB_EVENT_PATH"]) as f:
+              inp = json.load(f).get("inputs", {}) or {}
+          def val(k, d=""):
+              return (inp.get(k) or d).strip()
+          modus = val("modus", "controleren")
+          email = val("email").lower()
+          phone = val("contact_phone")
+          for secret in (email, phone):
+              if secret:
+                  print(f"::add-mask::{secret}")
+          group_name = val("groep", "Vrienden")
+          build_nr = val("build")
+          first, last = val("contact_first"), val("contact_last")
+          contact_email = val("contact_email")
+          wijzigen = modus in ("klaarzetten", "indienen")
+          print(f"Modus: {modus}")
+
+          LOCALE = "nl-NL"
+          DESCRIPTION = (
+              "Zerophone laat je Instagram en Snapchat gebruiken zonder de korte-videofeeds. "
+              "Reels, Verkennen, Spotlight en Discover staan uit; DM's, je feed van mensen die je "
+              "volgt, Stories en zoeken blijven werken. Een video die een vriend je stuurt mag je "
+              "bekijken, doorswipen naar de volgende niet.\n\n"
+              "Zerophone is niet gelieerd aan, goedgekeurd door of gesponsord door Instagram, Meta "
+              "Platforms, Snapchat of Snap Inc. Instagram en Snapchat zijn merken van hun "
+              "respectieve eigenaren. Zerophone toont de openbare websites van deze diensten; je "
+              "logt in op hun eigen inlogpagina en Zerophone slaat geen wachtwoorden op."
+          )
+          WHAT_TO_TEST = (
+              "Inloggen op Instagram en Snapchat, DM's sturen, een gedeelde reel openen, en of je "
+              "ergens toch in een eindeloze videofeed belandt. Meld wat niet werkt via TestFlight "
+              "of per e-mail."
+          )
+          REVIEW_NOTES = (
+              "Zerophone is a focused browser that displays the public websites of Instagram "
+              "(instagram.com) and Snapchat (snapchat.com/web) and hides short-form video feeds "
+              "(Reels, Explore, Spotlight, Discover). There is no Zerophone account. To test, sign "
+              "in with any Instagram or Snapchat account on the services' own login pages inside "
+              "the app. Zerophone does not store passwords and sends no data to its own servers. "
+              "Zerophone is not affiliated with Meta or Snap."
+          )
+
+          token = jwt.encode(
+              {"iss": os.environ["ASC_ISSUER_ID"], "iat": int(time.time()),
+               "exp": int(time.time()) + 900, "aud": "appstoreconnect-v1"},
+              os.environ["ASC_KEY_P8"], algorithm="ES256",
+              headers={"kid": os.environ["ASC_KEY_ID"], "typ": "JWT"})
+          H = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+          API = "https://api.appstoreconnect.apple.com/v1"
+
+          def call(method, path, ok=(), **kw):
+              r = requests.request(method, API + path, headers=H, timeout=30, **kw)
+              if r.status_code in ok:
+                  return None
+              if r.status_code >= 400:
+                  print(f"FOUT {r.status_code} bij {method} {path}: {r.text[:1500]}")
+                  sys.exit(1)
+              return r.json() if r.text else {}
+
+          app_id = call("GET", "/apps", params={"filter[bundleId]": "nl.paulquist.zerophone"})["data"][0]["id"]
+
+          # 1. Build kiezen
+          params = {"filter[app]": app_id, "sort": "-uploadedDate", "limit": 20,
+                    "filter[processingState]": "VALID"}
+          if build_nr:
+              params["filter[version]"] = build_nr
+          builds = call("GET", "/builds", params=params)["data"]
+          if not builds:
+              print("Geen verwerkte (VALID) build gevonden.")
+              sys.exit(1)
+          build = builds[0]
+          build_id = build["id"]
+          print(f"Build: {build['attributes']['version']} (verloopt {build['attributes'].get('expirationDate')})")
+
+          # 2. Externe groep
+          groups = call("GET", f"/apps/{app_id}/betaGroups", params={"limit": 50})["data"]
+          group = next((g for g in groups if g["attributes"]["name"] == group_name), None)
+          if group and group["attributes"].get("isInternalGroup"):
+              print(f"Groep '{group_name}' bestaat al maar is intern; kies een andere naam.")
+              sys.exit(1)
+          if group:
+              print(f"Externe groep '{group_name}' bestaat al")
+          elif wijzigen:
+              group = call("POST", "/betaGroups", json={"data": {
+                  "type": "betaGroups",
+                  "attributes": {"name": group_name, "publicLinkEnabled": False,
+                                 "feedbackEnabled": True},
+                  "relationships": {"app": {"data": {"type": "apps", "id": app_id}}}}})["data"]
+              print(f"Externe groep '{group_name}' aangemaakt (geen publieke link)")
+          else:
+              print(f"[controleren] Externe groep '{group_name}' zou worden aangemaakt")
+
+          # 3. Testinformatie op app-niveau (beschrijving + feedbackadres)
+          locs = call("GET", f"/apps/{app_id}/betaAppLocalizations")["data"]
+          loc = next((l for l in locs if l["attributes"]["locale"] == LOCALE), None)
+          print(f"Bestaande testinformatie-talen: {[l['attributes']['locale'] for l in locs] or 'geen'}")
+          attrs = {"description": DESCRIPTION, "feedbackEmail": contact_email}
+          if wijzigen:
+              if loc:
+                  call("PATCH", f"/betaAppLocalizations/{loc['id']}", json={"data": {
+                      "type": "betaAppLocalizations", "id": loc["id"], "attributes": attrs}})
+                  print(f"Testinformatie ({LOCALE}) bijgewerkt")
+              else:
+                  call("POST", "/betaAppLocalizations", json={"data": {
+                      "type": "betaAppLocalizations",
+                      "attributes": {"locale": LOCALE, **attrs},
+                      "relationships": {"app": {"data": {"type": "apps", "id": app_id}}}}})
+                  print(f"Testinformatie ({LOCALE}) aangemaakt")
+          else:
+              print(f"[controleren] Testinformatie ({LOCALE}) zou worden {'bijgewerkt' if loc else 'aangemaakt'}")
+
+          # 4. Gegevens voor de beoordelaar
+          detail = call("GET", f"/apps/{app_id}/betaAppReviewDetail")["data"]
+          da = detail["attributes"]
+          print("Beoordelingsgegevens nu: "
+                f"naam={'ja' if da.get('contactFirstName') else 'nee'}, "
+                f"telefoon={'ja' if da.get('contactPhone') else 'nee'}, "
+                f"e-mail={'ja' if da.get('contactEmail') else 'nee'}, "
+                f"demo-account vereist={da.get('demoAccountRequired')}")
+          review_attrs = {"contactFirstName": first, "contactLastName": last,
+                          "contactEmail": contact_email, "demoAccountRequired": False,
+                          "notes": REVIEW_NOTES}
+          if phone:
+              review_attrs["contactPhone"] = phone
+          if wijzigen:
+              call("PATCH", f"/betaAppReviewDetails/{detail['id']}", json={"data": {
+                  "type": "betaAppReviewDetails", "id": detail["id"], "attributes": review_attrs}})
+              print("Beoordelingsgegevens bijgewerkt" + ("" if phone else " (zonder telefoonnummer)"))
+          else:
+              print("[controleren] Beoordelingsgegevens zouden worden bijgewerkt")
+
+          # 5. 'Wat te testen' bij de build
+          blocs = call("GET", f"/builds/{build_id}/betaBuildLocalizations")["data"]
+          bloc = next((l for l in blocs if l["attributes"]["locale"] == LOCALE), None)
+          if wijzigen:
+              if bloc:
+                  call("PATCH", f"/betaBuildLocalizations/{bloc['id']}", json={"data": {
+                      "type": "betaBuildLocalizations", "id": bloc["id"],
+                      "attributes": {"whatsNew": WHAT_TO_TEST}}})
+              else:
+                  call("POST", "/betaBuildLocalizations", json={"data": {
+                      "type": "betaBuildLocalizations",
+                      "attributes": {"locale": LOCALE, "whatsNew": WHAT_TO_TEST},
+                      "relationships": {"build": {"data": {"type": "builds", "id": build_id}}}}})
+              print("'Wat te testen' ingesteld")
+          else:
+              print(f"[controleren] 'Wat te testen' zou worden {'bijgewerkt' if bloc else 'aangemaakt'}")
+
+          # 6. Build aan de groep koppelen
+          if group and wijzigen:
+              call("POST", f"/betaGroups/{group['id']}/relationships/builds",
+                   json={"data": [{"type": "builds", "id": build_id}]})
+              print("Build aan de groep gekoppeld")
+          elif not wijzigen:
+              print("[controleren] Build zou aan de groep worden gekoppeld")
+
+          # 7. Tester toevoegen
+          if email:
+              if group and wijzigen:
+                  existing = call("GET", "/betaTesters", params={"filter[email]": email})["data"]
+                  if existing:
+                      call("POST", f"/betaGroups/{group['id']}/relationships/betaTesters",
+                           json={"data": [{"type": "betaTesters", "id": existing[0]["id"]}]})
+                      print("Bestaande tester aan de groep toegevoegd")
+                  else:
+                      call("POST", "/betaTesters", json={"data": {
+                          "type": "betaTesters", "attributes": {"email": email},
+                          "relationships": {"betaGroups": {"data": [{"type": "betaGroups", "id": group["id"]}]}}}})
+                      print("Tester toegevoegd; uitnodiging volgt zodra de build beschikbaar is voor de groep")
+              elif not wijzigen:
+                  print("[controleren] Tester zou aan de groep worden toegevoegd")
+
+          # 8. Indienen voor Beta App Review
+          sub = call("GET", f"/builds/{build_id}/betaAppReviewSubmission", ok=(404,))
+          state = (sub or {}).get("data") or {}
+          state = (state.get("attributes") or {}).get("betaReviewState")
+          print(f"Beoordelingsstatus build: {state or 'niet ingediend'}")
+          if modus == "indienen":
+              if not phone and not da.get("contactPhone"):
+                  print("Geen telefoonnummer bekend; Apple vereist dat voor de beoordeling. Niet ingediend.")
+                  sys.exit(1)
+              if state:
+                  print("Build is al ingediend of beoordeeld; niet opnieuw ingediend")
+              else:
+                  r = call("POST", "/betaAppReviewSubmissions", json={"data": {
+                      "type": "betaAppReviewSubmissions",
+                      "relationships": {"build": {"data": {"type": "builds", "id": build_id}}}}})
+                  print(f"Ingediend voor Beta App Review: {r['data']['attributes'].get('betaReviewState')}")
+
+          # Samenvatting
+          detail_b = call("GET", f"/builds/{build_id}/buildBetaDetail")["data"]["attributes"]
+          print(f"Build intern={detail_b.get('internalBuildState')}, extern={detail_b.get('externalBuildState')}")
+          if group:
+              n = len(call("GET", f"/betaGroups/{group['id']}/betaTesters")["data"])
+              print(f"Groep '{group_name}': {n} tester(s)")
