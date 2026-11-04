@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "platforms": {
+    "instagram": {
+      "allowedHostSuffixes": ["instagram.com", "facebook.com", "fbcdn.net", "cdninstagram.com"],
+      "allowedPathPrefixes": ["/explore/search/"],
+      "redirects": { "/explore/": "/explore/search/" },
+      "blockedExactPaths": [],
+      "blockedPathPrefixes": ["/reels/", "/explore/"],
+      "singleViewPathPattern": "^/reel/[A-Za-z0-9_-]+/?$",
+      "hideSelectors": [
+        "a[href='/reels/']",
+        "a[href^='/reels/']",
+        "a[href^='/explore/tags/']",
+        "a[href^='/explore/locations/']"
+      ],
+      "textRules": [
+        {
+          "texts": ["Suggested for you", "Voorgesteld voor jou", "Suggested posts", "Voorgestelde berichten", "Suggested reels", "Voorgestelde reels"],
+          "hideClosest": "article"
+        }
+      ]
+    },
+    "snapchat": {
+      "allowedHostSuffixes": ["snapchat.com", "snap.com", "sc-cdn.net", "sc-static.net"],
+      "allowedPathPrefixes": [],
+      "redirects": {},
+      "blockedExactPaths": ["/spotlight/"],
+      "blockedPathPrefixes": ["/discover/", "/explore/"],
+      "singleViewPathPattern": "^/spotlight/[A-Za-z0-9_-]+/?$",
+      "hideSelectors": [
+        "a[href='/spotlight']",
+        "a[href='/spotlight/']",
+        "a[href^='/discover']",
+        "a[href^='/explore']"
+      ],
+      "textRules": []
+    }
+  }
+}

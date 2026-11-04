@@ -1,0 +1,40 @@
+# Bouwt Zerophone op een Mac van GitHub, zodat je zelf geen Xcode nodig hebt.
+# Resultaat: een ongesigneerde .ipa (onder Actions > run > Artifacts) die je
+# met AltStore en je gratis Apple ID op je iPhone zet.
+name: Build IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: XcodeGen installeren
+        run: brew install xcodegen
+
+      - name: Xcode-project genereren
+        run: xcodegen
+
+      - name: Bouwen (zonder ondertekening)
+        run: |
+          xcodebuild -project Zerophone.xcodeproj -target Zerophone \
+            -configuration Release -sdk iphoneos \
+            SYMROOT="$PWD/build" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: IPA maken
+        run: |
+          mkdir -p Payload
+          cp -R build/Release-iphoneos/Zerophone.app Payload/
+          zip -qry Zerophone-unsigned.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Zerophone-ipa
+          path: Zerophone-unsigned.ipa

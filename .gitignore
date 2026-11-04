@@ -1,0 +1,5 @@
+Zerophone.xcodeproj/
+build/
+Payload/
+*.ipa
+.DS_Store
