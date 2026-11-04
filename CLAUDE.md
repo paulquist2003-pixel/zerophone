@@ -34,6 +34,14 @@ Communiceer in het Nederlands, direct en zonder em-dashes.
   run na 15 minuten is opgegeven.
 - Buildnummer = `github.run_number` van de TestFlight-workflow; mislukte runs tellen mee.
 
+## App Store en externe TestFlight
+- Gaat het over App Store-teksten, een externe testgroep (vrienden), de app-naam, het icoon,
+  zoekwoorden, een privacybeleid of voorwaarden: lees eerst `docs/app-store.md`. Daar staan de
+  concept-disclaimer (NL en EN), waar die moet komen, de merkregels (geen Instagram, Snapchat,
+  Reels of logo's in naam, ondertitel, icoon of zoekwoorden) en de risico's.
+- Houd de technische lijn uit dat document aan: alleen de officiële website laden, geen
+  interne API, geen wachtwoorden opslaan, geen gegevens naar eigen servers, geen downloads.
+
 ## Niet doen
 - Geen wachtwoorden, sleutels of tokens in code, documenten of formulieren.
 - Niet inloggen bij App Store Connect; gebruik de API-workflows (`status.yml`, `tester.yml`).

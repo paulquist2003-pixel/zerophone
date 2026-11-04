@@ -140,6 +140,8 @@ CLAUDE.md                werkregels voor Claude-sessies in deze repo
   status.yml             build-status in App Store Connect opvragen
   tester.yml             TestFlight-tester toevoegen
 tests/                   jsdom-tests: cd tests && npm ci && npm test
+docs/
+  app-store.md           disclaimer, merkregels en risico's voor App Store en externe TestFlight
 signing/                 scripts voor certificaat en profiel (stap 3 en 4)
 Zerophone/
   Assets.xcassets        app-icoon
