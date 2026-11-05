@@ -85,27 +85,29 @@ jobs:
 
           LOCALE = "nl-NL"
           DESCRIPTION = (
-              "Zerophone laat je Instagram en Snapchat gebruiken zonder de korte-videofeeds. "
-              "Reels, Verkennen, Spotlight en Discover staan uit; DM's, je feed van mensen die je "
+              "Zerophone laat je Instagram gebruiken zonder de korte-videofeeds. "
+              "Reels en Verkennen staan uit; DM's, je feed van mensen die je "
               "volgt, Stories en zoeken blijven werken. Een video die een vriend je stuurt mag je "
               "bekijken, doorswipen naar de volgende niet.\n\n"
-              "Zerophone is niet gelieerd aan, goedgekeurd door of gesponsord door Instagram, Meta "
-              "Platforms, Snapchat of Snap Inc. Instagram en Snapchat zijn merken van hun "
-              "respectieve eigenaren. Zerophone toont de openbare websites van deze diensten; je "
+              "Zerophone is niet gelieerd aan, goedgekeurd door of gesponsord door Instagram of Meta "
+              "Platforms. Instagram is een merk van de eigenaar. Zerophone toont de openbare "
+              "website van deze dienst; je "
               "logt in op hun eigen inlogpagina en Zerophone slaat geen wachtwoorden op."
           )
           WHAT_TO_TEST = (
-              "Inloggen op Instagram en Snapchat, DM's sturen, een gedeelde reel openen, en of je "
-              "ergens toch in een eindeloze videofeed belandt. Meld wat niet werkt via TestFlight "
-              "of per e-mail."
+              "Alleen Instagram. Nieuw in deze build: uitleg bij de eerste start, de tab Zerophone met "
+              "een teller van wat is tegengehouden, schakelaars per onderdeel en een pincode op de "
+              "instellingen. Test: inloggen, DM's sturen, een gedeelde reel openen, of je ergens toch "
+              "in een eindeloze videofeed belandt, en de schakelaars. Zet na de eerste start ook een "
+              "Schermtijd-limiet op de Instagram-app. Meld wat niet werkt via TestFlight of per e-mail."
           )
           REVIEW_NOTES = (
-              "Zerophone is a focused browser that displays the public websites of Instagram "
-              "(instagram.com) and Snapchat (snapchat.com/web) and hides short-form video feeds "
-              "(Reels, Explore, Spotlight, Discover). There is no Zerophone account. To test, sign "
-              "in with any Instagram or Snapchat account on the services' own login pages inside "
+              "Zerophone is a focused browser that displays the public website of Instagram "
+              "(instagram.com) and hides short-form video feeds "
+              "(Reels, Explore). There is no Zerophone account. To test, sign "
+              "in with any Instagram account on the service's own login page inside "
               "the app. Zerophone does not store passwords and sends no data to its own servers. "
-              "Zerophone is not affiliated with Meta or Snap."
+              "Zerophone is not affiliated with Meta."
           )
 
           token = jwt.encode(
