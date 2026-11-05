@@ -82,6 +82,51 @@ struct PlatformRules: Codable {
     }
 }
 
+extension PlatformRules {
+    /// Past de instellingen van de gebruiker toe op de meegeleverde regels (alleen Instagram).
+    /// Strenger zetten haalt niets weg; een onderdeel toestaan haalt de bijbehorende regels weg.
+    func applying(_ s: SectionSettings) -> PlatformRules {
+        var blocked = blockedPathPrefixes
+        var redirects = self.redirects
+        var hide = hideSelectors
+        var texts = textRules
+        var guardConfig = videoGuard
+        var single = singleViewPathPattern
+
+        if !s.blockReels {
+            blocked.removeAll { $0 == "/reels/" }
+            hide.removeAll { $0.contains("/reels/") }
+            guardConfig = nil
+            single = nil
+        }
+        if !s.blockExplore {
+            blocked.removeAll { $0 == "/explore/" }
+            redirects.removeValue(forKey: "/explore/")
+            hide.removeAll { $0.contains("/explore/") }
+        }
+        if !s.blockSuggested {
+            texts = []
+        }
+        if s.blockStories {
+            blocked.append("/stories/")
+        }
+        if s.messagesOnly {
+            redirects["/"] = "/direct/inbox/"
+        }
+
+        return PlatformRules(allowedHostSuffixes: allowedHostSuffixes,
+                             allowedPathPrefixes: allowedPathPrefixes,
+                             redirects: redirects,
+                             blockedExactPaths: blockedExactPaths,
+                             blockedPathPrefixes: blocked,
+                             singleViewPathPattern: single,
+                             hideSelectors: hide,
+                             textRules: texts,
+                             videoGuard: guardConfig,
+                             followGate: followGate)
+    }
+}
+
 struct FilterRules: Codable {
     let version: Int
     let platforms: [String: PlatformRules]

@@ -1,6 +1,7 @@
 import Foundation
 
-/// De platforms die Zerophone in een gefilterde browser laadt.
+/// De platforms die Zerophone in een gefilterde browser kan laden. Op dit moment toont de app
+/// alleen Instagram (zie ContentView); Snapchat blijft hier staan voor later, zie docs/snapchat-later.md.
 enum Platform: String, CaseIterable, Identifiable {
     case instagram
     case snapchat
@@ -51,6 +52,17 @@ enum Platform: String, CaseIterable, Identifiable {
     /// mobiele Safari herkennen in plaats van als "kale" in-app browser.
     var applicationNameForUserAgent: String {
         "Version/18.0 Mobile/15E148 Safari/604.1"
+    }
+
+    /// Melding bij een geblokkeerd pad; specifieker dan `blockMessage` waar dat kan.
+    func blockMessage(forPath path: String) -> String {
+        if self == .instagram {
+            let p = path.lowercased()
+            if p.hasPrefix("/stories/") { return "Stories staan uit" }
+            if p.hasPrefix("/reels/") { return "Reels staan uit" }
+            if p.hasPrefix("/explore/") { return "Verkennen staat uit" }
+        }
+        return blockMessage
     }
 
     var blockMessage: String {

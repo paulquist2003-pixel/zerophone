@@ -1,21 +1,32 @@
 import SwiftUI
 import WebKit
 
+/// Op dit moment alleen Instagram; Snapchat staat klaar in Platform.swift en de regels
+/// (zie docs/snapchat-later.md), maar wordt niet getoond of geladen.
 struct ContentView: View {
     @StateObject private var instagram = WebViewStore(platform: .instagram)
-    @StateObject private var snapchat = WebViewStore(platform: .snapchat)
     @ObservedObject private var rulesStore = RulesStore.shared
+    @ObservedObject private var settings = ZerophoneSettings.shared
+    @State private var showOnboarding = !UserDefaults.standard.bool(forKey: "zerophone.onboardingDone")
 
     var body: some View {
         TabView {
             PlatformScreen(store: instagram)
                 .tabItem { Label(Platform.instagram.displayName, systemImage: Platform.instagram.systemImage) }
-            PlatformScreen(store: snapchat)
-                .tabItem { Label(Platform.snapchat.displayName, systemImage: Platform.snapchat.systemImage) }
+            ZerophoneTab()
+                .tabItem { Label("Zerophone", systemImage: "circle.slash") }
         }
         .onReceive(rulesStore.$rules) { rules in
             instagram.installScripts(rules)
-            snapchat.installScripts(rules)
+        }
+        .onChange(of: settings.revision) { _, _ in
+            instagram.settingsChanged()
+        }
+        .fullScreenCover(isPresented: $showOnboarding) {
+            OnboardingView {
+                UserDefaults.standard.set(true, forKey: "zerophone.onboardingDone")
+                showOnboarding = false
+            }
         }
     }
 }

@@ -1,4 +1,7 @@
-# Zerophone (fase 1: Instagram en Snapchat zonder Reels en Spotlight)
+# Zerophone (fase 1: Instagram zonder Reels)
+
+> Tijdelijk toont de app alleen Instagram, om dat eerst goed te krijgen. De Snapchat-regels
+> staan nog in de code; zie `docs/snapchat-later.md`.
 
 Zerophone laadt Instagram en Snapchat via hun websites in een eigen browser en
 filtert de korte-videofeeds eruit. DM's, je feed van mensen die je volgt, Stories,
@@ -13,6 +16,16 @@ zoeken en profielen blijven werken.
 | Gedeelde video van een vriend | Bekijken mag, doorswipen niet (ook niet in DM's) | Bekijken mag, doorswipen niet |
 | Profielen en posts | Alleen content van accounts die je volgt (volgpoort) | |
 | Overig | Video's spelen niet automatisch af; externe links openen in Safari; `instagram://`-links worden tegengehouden zodat je niet in de echte app belandt | Zelfde |
+
+## Instellingen, pincode en tegengehouden-teller
+
+De tab Zerophone toont hoe vaak de app iets tegenhield (vandaag, 7 dagen, totaal) en een
+geschatte bespaarde tijd (aanname: 1 minuut per keer, geen meting). Alles blijft op het toestel.
+Onder Instellingen (optioneel achter een pincode van 4 cijfers) staan schakelaars voor Reels,
+Verkennen, voorgestelde posts, Stories en "Alleen berichten". De schakelaars passen de regels uit
+`rules.json` in Swift aan (`PlatformRules.applying`); de pincode staat als gezouten hash in
+UserDefaults, dus de app opnieuw installeren zet hem terug. Bij de eerste start toont de app een
+uitleg in vier pagina's.
 
 ## Installeren via TestFlight (zonder Xcode)
 

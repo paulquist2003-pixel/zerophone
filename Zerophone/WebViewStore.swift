@@ -13,6 +13,14 @@ final class WebViewStore: NSObject, ObservableObject {
     let platform: Platform
     let webView: WKWebView
 
+    /// Startpagina; met "Alleen berichten" is dat de inbox.
+    var startURL: URL {
+        if platform == .instagram, ZerophoneSettings.shared.current.messagesOnly {
+            return URL(string: "https://www.instagram.com/direct/inbox/")!
+        }
+        return platform.startURL
+    }
+
     @Published var bannerText: String?
 
     private var currentRules: PlatformRules?
@@ -78,7 +86,7 @@ final class WebViewStore: NSObject, ObservableObject {
     func loadIfNeeded() {
         guard !didLoad else { return }
         didLoad = true
-        webView.load(URLRequest(url: platform.startURL))
+        webView.load(URLRequest(url: startURL))
     }
 
     /// Injecteert filter.js met de regels van dit platform. Werkt vanaf de
@@ -87,12 +95,20 @@ final class WebViewStore: NSObject, ObservableObject {
         let controller = webView.configuration.userContentController
         controller.removeAllUserScripts()
 
-        guard let platformRules = rules.rules(for: platform),
+        guard let baseRules = rules.rules(for: platform),
               let jsURL = Bundle.main.url(forResource: "filter", withExtension: "js"),
-              let js = try? String(contentsOf: jsURL, encoding: .utf8),
-              let configData = try? JSONEncoder().encode(platformRules),
-              let configJSON = String(data: configData, encoding: .utf8) else {
+              let js = try? String(contentsOf: jsURL, encoding: .utf8) else {
             assertionFailure("Filterscript of regels niet gevonden voor \(platform)")
+            return
+        }
+
+        // Instellingen van de gebruiker (schakelaars per onderdeel) gelden voor Instagram.
+        let platformRules = platform == .instagram
+            ? baseRules.applying(ZerophoneSettings.shared.current)
+            : baseRules
+        guard let configData = try? JSONEncoder().encode(platformRules),
+              let configJSON = String(data: configData, encoding: .utf8) else {
+            assertionFailure("Regels niet te coderen voor \(platform)")
             return
         }
 
@@ -102,6 +118,16 @@ final class WebViewStore: NSObject, ObservableObject {
         controller.addUserScript(
             WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true)
         )
+    }
+
+    /// De gebruiker heeft een schakelaar omgezet: regels opnieuw injecteren en de pagina verversen,
+    /// zodat het meteen geldt (een nu geblokkeerde pagina wordt dan alsnog tegengehouden).
+    func settingsChanged() {
+        installScripts(RulesStore.shared.rules)
+        lastHandledPath = nil
+        if didLoad, webView.url != nil {
+            webView.reload()
+        }
     }
 
     // MARK: - Routelogica
@@ -126,13 +152,13 @@ final class WebViewStore: NSObject, ObservableObject {
             return
         }
         if rules.isBlocked(path: path) {
-            block(message: platform.blockMessage)
+            block(message: platform.blockMessage(forPath: path), kind: .forPath(path))
             return
         }
 
         let isSingle = rules.isSingleView(path: path)
         if isSingle && lastWasSingleView && PlatformRules.normalized(path) != PlatformRules.normalized(lastPath) {
-            block(message: Self.swipeBlockedText)
+            block(message: Self.swipeBlockedText, kind: .swipe)
             return
         }
 
@@ -179,17 +205,18 @@ final class WebViewStore: NSObject, ObservableObject {
         }
     }
 
-    private func block(message: String) {
+    private func block(message: String, kind: StopKind) {
+        StatsStore.shared.record(kind)
         if webView.canGoBack {
             webView.goBack()
         } else {
-            webView.load(URLRequest(url: platform.startURL))
+            webView.load(URLRequest(url: startURL))
         }
         showBanner(message)
     }
 
     private func load(path: String) {
-        var components = URLComponents(url: webView.url ?? platform.startURL, resolvingAgainstBaseURL: false)
+        var components = URLComponents(url: webView.url ?? startURL, resolvingAgainstBaseURL: false)
         components?.path = path
         components?.query = nil
         components?.fragment = nil
@@ -221,11 +248,14 @@ extension WebViewStore: WKScriptMessageHandler {
         case "route":
             if let path = body["path"] as? String { handleRoute(path) }
         case "blockedClick":
-            showBanner(platform.blockMessage)
+            let path = body["path"] as? String ?? ""
+            StatsStore.shared.record(.forPath(path))
+            showBanner(platform.blockMessage(forPath: path))
         case "swipeBlocked":
             if (body["leave"] as? Bool) == true {
-                block(message: Self.swipeBlockedText)
+                block(message: Self.swipeBlockedText, kind: .swipe)
             } else {
+                StatsStore.shared.record(.swipe)
                 showBanner(Self.swipeBlockedText)
             }
         case "notice":
@@ -264,12 +294,13 @@ extension WebViewStore: WKNavigationDelegate {
         }
 
         if rules.isBlocked(path: url.path) {
-            showBanner(platform.blockMessage)
+            StatsStore.shared.record(.forPath(url.path))
+            showBanner(platform.blockMessage(forPath: url.path))
             if webView.url == nil {
                 // Eerste lading van een geblokkeerde pagina: ga naar de startpagina.
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
-                    self.webView.load(URLRequest(url: self.platform.startURL))
+                    self.webView.load(URLRequest(url: self.startURL))
                 }
             }
             return .cancel
@@ -297,7 +328,7 @@ extension WebViewStore: WKNavigationDelegate {
         if webView.url != nil {
             webView.reload()
         } else if didLoad {
-            webView.load(URLRequest(url: platform.startURL))
+            webView.load(URLRequest(url: startURL))
         }
     }
 }
