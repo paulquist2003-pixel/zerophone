@@ -95,9 +95,10 @@ jobs:
               "logt in op hun eigen inlogpagina en Zerophone slaat geen wachtwoorden op."
           )
           WHAT_TO_TEST = (
-              "Alleen Instagram. Nieuw in deze build: uitleg bij de eerste start, de tab Zerophone met "
-              "een teller van wat is tegengehouden, schakelaars per onderdeel en een pincode op de "
-              "instellingen. Test: inloggen, DM's sturen, een gedeelde reel openen, of je ergens toch "
+              "Alleen Instagram. Nieuw in deze build: voorgestelde en aanbevolen posts van accounts die "
+              "je niet volgt verdwijnen uit je feed. Verder: uitleg bij de eerste start, de tab "
+              "Zerophone met een teller van wat is tegengehouden, schakelaars per onderdeel en een "
+              "pincode op de instellingen. Test: inloggen, of je feed alleen accounts toont die je volgt, DM's sturen, een gedeelde reel openen, of je ergens toch "
               "in een eindeloze videofeed belandt, en de schakelaars. Zet na de eerste start ook een "
               "Schermtijd-limiet op de Instagram-app. Meld wat niet werkt via TestFlight of per e-mail."
           )
