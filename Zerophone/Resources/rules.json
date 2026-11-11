@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "platforms": {
     "instagram": {
       "allowedHostSuffixes": ["instagram.com", "facebook.com", "fbcdn.net", "cdninstagram.com"],
@@ -16,10 +16,15 @@
       ],
       "textRules": [
         {
-          "texts": ["Suggested for you", "Voorgesteld voor jou", "Suggested posts", "Voorgestelde berichten", "Suggested reels", "Voorgestelde reels"],
+          "texts": ["Suggested for you", "Voorgesteld voor jou", "Recommended for you", "Aanbevolen voor jou", "Suggested posts", "Voorgestelde berichten", "Suggested reels", "Voorgestelde reels"],
           "hideClosest": "article"
         }
       ],
+      "feedFilter": {
+        "feedPaths": ["/"],
+        "postSelector": "article, [role='article']",
+        "followTexts": ["Follow", "Volgen"]
+      },
       "videoGuard": {
         "pagePatterns": ["^/([a-z0-9._]+/)?reel/[a-z0-9_-]+/$"],
         "overlayPathPrefixes": ["/direct/"],

@@ -18,6 +18,18 @@ struct VideoGuard: Codable, Hashable {
     let exemptPathPrefixes: [String]
 }
 
+/// Feedfilter (filter.js): op de hoofdfeed wordt elke post verborgen waarvan de kop een
+/// Volgen-knop heeft. Zo'n post komt van een account dat je niet volgt, dus is voorgesteld of
+/// aanbevolen, ook als er geen label boven staat. Alleen doorgegeven aan JS.
+struct FeedFilter: Codable, Hashable {
+    /// Paden (kleine letters, afsluitende "/") die als hoofdfeed gelden.
+    let feedPaths: [String]
+    /// Selector voor één post in de feed.
+    let postSelector: String
+    /// Knopteksten die betekenen "je volgt dit account niet".
+    let followTexts: [String]
+}
+
 /// Volgpoort (filter.js): op profielen en posts van accounts die je niet volgt
 /// wordt de content verborgen. Alleen doorgegeven aan JS.
 struct FollowGate: Codable, Hashable {
@@ -52,6 +64,7 @@ struct PlatformRules: Codable {
     let singleViewPathPattern: String?
     let hideSelectors: [String]
     let textRules: [TextRule]
+    let feedFilter: FeedFilter?
     let videoGuard: VideoGuard?
     let followGate: FollowGate?
 
@@ -90,6 +103,7 @@ extension PlatformRules {
         var redirects = self.redirects
         var hide = hideSelectors
         var texts = textRules
+        var feed = feedFilter
         var guardConfig = videoGuard
         var single = singleViewPathPattern
 
@@ -106,6 +120,7 @@ extension PlatformRules {
         }
         if !s.blockSuggested {
             texts = []
+            feed = nil
         }
         if s.blockStories {
             blocked.append("/stories/")
@@ -122,6 +137,7 @@ extension PlatformRules {
                              singleViewPathPattern: single,
                              hideSelectors: hide,
                              textRules: texts,
+                             feedFilter: feed,
                              videoGuard: guardConfig,
                              followGate: followGate)
     }

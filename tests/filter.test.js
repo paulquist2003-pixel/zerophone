@@ -710,11 +710,12 @@ async function testRulesContract() {
   console.log('\n[rules.json tegenover de Swift-structs]');
   // Verplichte sleutels (niet-optionele Codable-velden); ontbreekt er één, dan faalt het decoderen -> fatalError bij start.
   const platformRequired = ['allowedHostSuffixes', 'allowedPathPrefixes', 'redirects', 'blockedExactPaths', 'blockedPathPrefixes', 'hideSelectors', 'textRules'];
-  const platformOptional = ['singleViewPathPattern', 'videoGuard', 'followGate'];
+  const platformOptional = ['singleViewPathPattern', 'feedFilter', 'videoGuard', 'followGate'];
+  const ffKeys = ['feedPaths', 'postSelector', 'followTexts'];
   const vgKeys = ['pagePatterns', 'overlayPathPrefixes', 'exemptPathPrefixes'];
   const fgRequired = ['pathPatterns', 'exemptPathPrefixes', 'followTexts', 'followedTexts', 'hidePostLinks', 'hideAlways', 'message'];
   const fgOptional = ['selfSelector'];
-  check('versie is 2', RULES.version === 2, RULES.version);
+  check('versie is 3', RULES.version === 3, RULES.version);
   for (const [name, p] of Object.entries(RULES.platforms)) {
     const missing = platformRequired.filter((k) => !(k in p));
     check(`${name}: alle verplichte sleutels aanwezig`, missing.length === 0, missing);
@@ -725,6 +726,11 @@ async function testRulesContract() {
       const m = vgKeys.filter((k) => !Array.isArray(p.videoGuard[k]));
       const u = Object.keys(p.videoGuard).filter((k) => !vgKeys.includes(k));
       check(`${name}: videoGuard komt overeen met struct`, m.length === 0 && u.length === 0, { m, u });
+    }
+    if (p.feedFilter) {
+      const m = ffKeys.filter((k) => !(k in p.feedFilter));
+      const u = Object.keys(p.feedFilter).filter((k) => !ffKeys.includes(k));
+      check(`${name}: feedFilter komt overeen met struct`, m.length === 0 && u.length === 0 && Array.isArray(p.feedFilter.feedPaths) && typeof p.feedFilter.postSelector === 'string' && Array.isArray(p.feedFilter.followTexts), { m, u });
     }
     if (p.followGate) {
       const m = fgRequired.filter((k) => !(k in p.followGate));
@@ -739,10 +745,77 @@ async function testRulesContract() {
   }
 }
 
+async function testFeedFilter() {
+  console.log('\n[feedfilter: posts met een Volgen-knop op de hoofdfeed]');
+  const post = (id, label, btn, body = 'foto') =>
+    `<article id="${id}"><header><a href="/x/">x</a>${label ? `<span>${label}</span>` : ''}${btn ? `<div role="button">${btn}</div>` : ''}</header><div>${body}</div></article>`;
+  const env = makeEnv({
+    url: 'https://www.instagram.com/',
+    html: '<main id="feed">' + post('own', null, null) + post('rec', 'Aanbevolen voor jou', 'Volgen') + post('nolabel', null, 'Volgen') + post('en', null, 'Follow') + '</main>',
+  });
+  const { d } = env;
+  await sleep(250);
+  const hidden = (id) => d.getElementById(id).hasAttribute('data-sv-hidden');
+  check('gevolgde post (geen Volgen-knop) blijft staan', !hidden('own'));
+  check('"Aanbevolen voor jou" met Volgen verborgen (screenshot Paul)', hidden('rec'));
+  check('post met Volgen-knop zonder label verborgen', hidden('nolabel'));
+  check('Engelse Follow-knop verborgen', hidden('en'));
+
+  // Later binnengeladen post
+  d.getElementById('feed').insertAdjacentHTML('beforeend', post('late', null, 'Volgen') + post('late2', null, null));
+  await sleep(300);
+  check('nieuw geladen voorgestelde post verborgen', hidden('late'));
+  check('nieuw geladen gewone post blijft', !hidden('late2'));
+
+  // Knoptekst die pas later wordt ingevuld
+  d.getElementById('feed').insertAdjacentHTML('beforeend', '<article id="slow"><div role="button" id="slowbtn">...</div></article>');
+  await sleep(300);
+  check('knop met tijdelijke tekst nog niet verborgen', !hidden('slow'));
+  d.getElementById('slowbtn').firstChild.nodeValue = 'Volgen';
+  await sleep(100);
+  check('knoptekst wordt later "Volgen" -> verborgen', hidden('slow'));
+
+  // Labeltekst alleen (tekstregel) werkt ook zonder knop
+  d.getElementById('feed').insertAdjacentHTML('beforeend', post('lbl', 'Aanbevolen voor jou', null));
+  await sleep(300);
+  check('label "Aanbevolen voor jou" alleen is genoeg (tekstregel)', hidden('lbl'));
+
+  // Veiligheid: een container met meerdere posts wordt nooit verborgen
+  d.body.insertAdjacentHTML('beforeend', '<article id="outer"><div role="button">Volgen</div><article id="inner"><span>post</span></article></article>');
+  await sleep(300);
+  check('container met posts erin niet verborgen', !hidden('outer'));
+  check('state telt verborgen en ongematchte knoppen', env.w.__SV_state().feedFilter.hidden >= 4 && env.w.__SV_state().feedFilter.unmatched >= 1, env.w.__SV_state().feedFilter);
+  env.close();
+
+  // Niet op een profiel (daar regelt de volgpoort het) en niet in DM's
+  const env2 = makeEnv({ url: 'https://www.instagram.com/direct/inbox/', html: post('dm', null, 'Volgen') });
+  await sleep(250);
+  check('buiten de feed (DM) niets verborgen', !env2.d.getElementById('dm').hasAttribute('data-sv-hidden'));
+  env2.go('/');
+  await sleep(50);
+  check('routewissel naar de feed loopt bestaande posts na', env2.d.getElementById('dm').hasAttribute('data-sv-hidden'));
+  env2.close();
+
+  // Schakelaar uit: Swift laat feedFilter weg
+  const cfg = JSON.parse(JSON.stringify(RULES.platforms.instagram));
+  delete cfg.feedFilter;
+  const vc = new VirtualConsole();
+  const dom = new JSDOM(`<!doctype html><html><body>${post('off', null, 'Volgen')}</body></html>`, { url: 'https://www.instagram.com/', runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole: vc });
+  dom.window.webkit = { messageHandlers: { sv: { postMessage: () => {} } } };
+  dom.window.IntersectionObserver = class { observe() {} unobserve() {} disconnect() {} };
+  dom.window.__SV_CONFIG = cfg;
+  dom.window.__SV_ENV = { lockZoom: false };
+  dom.window.eval(FILTER_JS);
+  await sleep(250);
+  check('zonder feedFilter (schakelaar uit) blijft de post staan', !dom.window.document.getElementById('off').hasAttribute('data-sv-hidden'));
+  dom.window.close();
+}
+
 (async () => {
   await testRulesContract();
   await testClassify();
   await testTextRules();
+  await testFeedFilter();
   await testZoomLock();
   await testFollowGate();
   await testVideoGuard();

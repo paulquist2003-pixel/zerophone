@@ -161,6 +161,39 @@
     while ((node = walker.nextNode())) checkText(node);
   }
 
+  // ---------- 2b. Feedfilter ----------
+  // Op de hoofdfeed: verberg elke post met een Volgen-knop. Die post komt van een account
+  // dat je niet volgt ("Aanbevolen voor jou" en dergelijke), ook als er geen label boven staat.
+
+  var ff = cfg.feedFilter || null;
+  var ffTexts = ff ? toSet(ff.followTexts) : {};
+  var ffHidden = 0;
+  var ffUnmatched = 0;
+
+  function onFeed() {
+    return !!ff && ff.feedPaths.indexOf(norm(location.pathname)) !== -1;
+  }
+
+  function checkFeedButton(btn) {
+    var t = (btn.textContent || '').trim();
+    if (!t || t.length > 30 || !ffTexts[t]) return;
+    var post = btn.closest(ff.postSelector);
+    // Geen post gevonden, of een container met meerdere posts erin: niets verbergen.
+    if (!post || post.querySelector(ff.postSelector)) { ffUnmatched++; return; }
+    if (!post.hasAttribute('data-sv-hidden')) { ffHidden++; hideEl(post); }
+  }
+
+  function applyFeedFilterIn(root) {
+    if (!root || !onFeed()) return;
+    if (root.nodeType === 3) root = root.parentElement;
+    if (!root || root.nodeType !== 1) return;
+    var sel = 'button,[role="button"]';
+    if (root.matches && root.matches(sel)) checkFeedButton(root);
+    var buttons = root.querySelectorAll(sel);
+    for (var i = 0; i < buttons.length; i++) checkFeedButton(buttons[i]);
+    if (root.closest) { var up = root.closest(sel); if (up && up !== root) checkFeedButton(up); }
+  }
+
   // ---------- 3. Volgpoort ----------
 
   var fg = cfg.followGate || null;
@@ -590,7 +623,8 @@
       guardMode: vg ? guardMode() : null,
       hasAnchor: !!guard.anchor,
       scrollLocked: !!prot.lockEl,
-      masked: prot.masked.length
+      masked: prot.masked.length,
+      feedFilter: ff ? { onFeed: onFeed(), hidden: ffHidden, unmatched: ffUnmatched } : null
     };
   };
 
@@ -622,6 +656,7 @@
         fullPass = false;
         queue = [];
         applyTextRulesIn(document.body);
+        applyFeedFilterIn(document.body);
         observeVideosIn(document.body);
       }
     } else {
@@ -630,6 +665,7 @@
       for (var i = 0; i < roots.length; i++) {
         if (!roots[i].isConnected) continue;
         applyTextRulesIn(roots[i]);
+        applyFeedFilterIn(roots[i]);
         observeVideosIn(roots[i]);
       }
     }
@@ -650,6 +686,8 @@
   function onRouteChange() {
     report();
     updateFollowGate();
+    // Terug op de feed: bestaande posts opnieuw nalopen (Instagram hergebruikt soms de DOM).
+    if (onFeed()) applyFeedFilterIn(document.body);
     // Andere pagina: slot en maskers direct eraf, anders blijft bijv. de feed op slot staan.
     if (vg) resetGuardIfMoved();
   }
@@ -688,11 +726,12 @@
       var r = records[i];
       if (r.type === 'characterData') {
         if (hasTextRules) checkText(r.target);
+        if (ff) applyFeedFilterIn(r.target);
         continue;
       }
       for (var j = 0; j < r.addedNodes.length; j++) {
         var n = r.addedNodes[j];
-        if (n.nodeType === 3) { if (hasTextRules) checkText(n); } else if (n.nodeType === 1) enqueue(n);
+        if (n.nodeType === 3) { if (hasTextRules) checkText(n); if (ff) applyFeedFilterIn(n); } else if (n.nodeType === 1) enqueue(n);
       }
     }
     schedule();
