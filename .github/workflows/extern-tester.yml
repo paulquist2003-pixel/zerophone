@@ -13,11 +13,11 @@ on:
   workflow_dispatch:
     inputs:
       modus:
-        description: "controleren, klaarzetten of indienen"
+        description: "controleren, klaarzetten, indienen of uitnodigen (uitnodigingsmail opnieuw sturen)"
         required: true
         default: "controleren"
         type: choice
-        options: [controleren, klaarzetten, indienen]
+        options: [controleren, klaarzetten, indienen, uitnodigen]
       email:
         description: "E-mailadres van de externe tester (leeg = geen tester toevoegen)"
         required: false
@@ -240,6 +240,21 @@ jobs:
                       print("Tester toegevoegd; uitnodiging volgt zodra de build beschikbaar is voor de groep")
               elif not wijzigen:
                   print("[controleren] Tester zou aan de groep worden toegevoegd")
+
+              # Stand van deze tester (zonder e-mailadres in het log)
+              t = call("GET", "/betaTesters", params={"filter[email]": email})["data"]
+              if t:
+                  ta = t[0].get("attributes") or {}
+                  print(f"Tester: state={ta.get('state')}, inviteType={ta.get('inviteType')}")
+                  if modus == "uitnodigen":
+                      call("POST", "/betaTesterInvitations", json={"data": {
+                          "type": "betaTesterInvitations",
+                          "relationships": {
+                              "app": {"data": {"type": "apps", "id": app_id}},
+                              "betaTester": {"data": {"type": "betaTesters", "id": t[0]["id"]}}}}})
+                      print("Uitnodigingsmail opnieuw verstuurd")
+              else:
+                  print("Tester: (nog) niet gevonden")
 
           # 8. Indienen voor Beta App Review
           sub = call("GET", f"/builds/{build_id}/betaAppReviewSubmission", ok=(404,))
