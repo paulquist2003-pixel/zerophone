@@ -22,6 +22,13 @@ final class WebViewStore: NSObject, ObservableObject {
     }
 
     @Published var bannerText: String?
+    /// Laadstatus voor de balk bovenin en het scherm bij de eerste lading.
+    @Published private(set) var isLoading = false
+    @Published private(set) var progress: Double = 0
+    /// Pas waar zodra er een pagina in beeld staat; tot dan toont de app een laadscherm.
+    @Published private(set) var hasCommittedPage = false
+    /// Gezet als de eerste pagina niet laadt; de app toont dan een foutscherm met "Opnieuw".
+    @Published private(set) var loadErrorText: String?
 
     private var currentRules: PlatformRules?
     private var lastPath = "/"
@@ -30,6 +37,8 @@ final class WebViewStore: NSObject, ObservableObject {
     private var didLoad = false
     private var bannerTask: Task<Void, Never>?
     private var urlObservation: NSKeyValueObservation?
+    private var progressObservation: NSKeyValueObservation?
+    private var loadingObservation: NSKeyValueObservation?
     private var refreshControl: UIRefreshControl?
     private var refreshTask: Task<Void, Never>?
 
@@ -78,8 +87,64 @@ final class WebViewStore: NSObject, ObservableObject {
             }
         }
 
+        progressObservation = webView.observe(\.estimatedProgress, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.progress = self.webView.estimatedProgress
+            }
+        }
+        loadingObservation = webView.observe(\.isLoading, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.isLoading = self.webView.isLoading
+            }
+        }
+
         setUpPullToRefresh()
         installScripts(RulesStore.shared.rules)
+    }
+
+    /// Knop "Opnieuw" op het foutscherm.
+    func retry() {
+        loadErrorText = nil
+        if webView.url != nil {
+            webView.reload()
+        } else {
+            webView.load(URLRequest(url: startURL))
+        }
+    }
+
+    /// Een pagina laadt niet. Zolang er nog niets in beeld stond: foutscherm. Anders blijft de
+    /// oude pagina staan en volstaat een korte melding.
+    private func handleLoadFailure(_ error: Error) {
+        endRefreshing()
+        let ns = error as NSError
+        // Geannuleerd (eigen blokkade of een nieuwe navigatie) is geen fout.
+        if ns.domain == NSURLErrorDomain && ns.code == NSURLErrorCancelled { return }
+        if ns.domain == "WebKitErrorDomain" && ns.code == 102 { return }
+
+        let offline = [NSURLErrorNotConnectedToInternet, NSURLErrorNetworkConnectionLost,
+                       NSURLErrorTimedOut, NSURLErrorCannotFindHost, NSURLErrorCannotConnectToHost,
+                       NSURLErrorDNSLookupFailed, NSURLErrorDataNotAllowed,
+                       NSURLErrorInternationalRoamingOff]
+        let long: String
+        let short: String
+        if ns.domain == "WebKitErrorDomain" && (ns.code == 104 || ns.code == 105) {
+            // Ongedocumenteerde codes; volgens Apple DTS het gevolg van Schermtijd-webbeperkingen.
+            long = "Instagram lijkt geblokkeerd door Schermtijd. Staat instagram.com bij de websitebeperkingen of websitelimieten? Haal hem daar weg: de limiet hoort op de app, niet op de website."
+            short = "Geblokkeerd door Schermtijd"
+        } else if ns.domain == NSURLErrorDomain && offline.contains(ns.code) {
+            long = "Geen verbinding. Controleer je internet en probeer het opnieuw."
+            short = "Geen verbinding"
+        } else {
+            long = "Instagram laadt niet. Probeer het opnieuw."
+            short = "Laden mislukt"
+        }
+        if hasCommittedPage {
+            showBanner(short)
+        } else {
+            loadErrorText = long
+        }
     }
 
     /// Laadt de startpagina één keer, bij de eerste keer dat de tab in beeld komt.
@@ -135,6 +200,12 @@ final class WebViewStore: NSObject, ObservableObject {
     private func urlChanged(_ url: URL) {
         guard let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http",
               currentRules?.isAllowedHost(url.host) == true else { return }
+        // Binnen een beperkte host (facebook.com) doorgeklikt naar iets anders dan inloggen.
+        if currentRules?.isAllowedPath(host: url.host, path: url.path) == false {
+            webView.load(URLRequest(url: startURL))
+            showBanner("Deze pagina opent niet in Zerophone")
+            return
+        }
         handleRoute(url.path)
     }
 
@@ -259,7 +330,12 @@ extension WebViewStore: WKScriptMessageHandler {
                 showBanner(Self.swipeBlockedText)
             }
         case "notice":
-            if let text = body["text"] as? String { showBanner(text) }
+            // De pagina stuurt alleen een code; de tekst komt uit de regels, niet uit de pagina.
+            if (body["code"] as? String) == "followGate", let text = currentRules?.followGate?.message {
+                showBanner(text)
+            }
+        case "feedEnd":
+            StatsStore.shared.record(.feedEnd)
         default:
             break
         }
@@ -277,7 +353,15 @@ extension WebViewStore: WKNavigationDelegate {
         if ["about", "blob", "data"].contains(scheme) { return .allow }
 
         // instagram://, snapchat://, itms-apps:// zouden je terugsturen naar de echte app.
-        guard scheme == "https" || scheme == "http" else { return .cancel }
+        guard scheme == "https" || scheme == "http" else {
+            if ["mailto", "tel", "sms"].contains(scheme) {
+                _ = await UIApplication.shared.open(url)
+            } else if navigationAction.navigationType == .linkActivated {
+                // Alleen bij een tik: anders voelt de knop kapot. Pogingen van de pagina zelf blijven stil.
+                showBanner("De \(platform.displayName)-app openen staat uit")
+            }
+            return .cancel
+        }
 
         // Iframes (inlogschermen, media) laten we met rust.
         let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
@@ -285,6 +369,12 @@ extension WebViewStore: WKNavigationDelegate {
 
         if !rules.isAllowedHost(url.host) {
             _ = await UIApplication.shared.open(url)   // externe links naar Safari
+            return .cancel
+        }
+
+        // facebook.com mag alleen voor inloggen; de rest (video's, feed) hoort niet in Zerophone.
+        if !rules.isAllowedPath(host: url.host, path: url.path) {
+            _ = await UIApplication.shared.open(url)
             return .cancel
         }
 
@@ -309,18 +399,23 @@ extension WebViewStore: WKNavigationDelegate {
         return .allow
     }
 
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        hasCommittedPage = true
+        loadErrorText = nil
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         endRefreshing()
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        endRefreshing()
+        handleLoadFailure(error)
     }
 
     func webView(_ webView: WKWebView,
                  didFailProvisionalNavigation navigation: WKNavigation!,
                  withError error: Error) {
-        endRefreshing()
+        handleLoadFailure(error)
     }
 
     /// iOS beëindigt het webproces in de achtergrond; zonder reload blijft het scherm wit.

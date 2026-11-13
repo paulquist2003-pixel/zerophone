@@ -17,15 +17,30 @@ zoeken en profielen blijven werken.
 | Profielen en posts | Alleen content van accounts die je volgt (volgpoort) | |
 | Overig | Video's spelen niet automatisch af; externe links openen in Safari; `instagram://`-links worden tegengehouden zodat je niet in de echte app belandt | Zelfde |
 
-## Instellingen, pincode en tegengehouden-teller
+## Instellingen, bedenktijd, pincode en cijfers
 
-De tab Zerophone toont hoe vaak de app iets tegenhield (vandaag, 7 dagen, totaal) en een
-geschatte bespaarde tijd (aanname: 1 minuut per keer, geen meting). Alles blijft op het toestel.
+De tab Zerophone toont hoe vaak de app iets tegenhield (vandaag, 7 dagen, totaal) en hoe lang
+Zerophone per dag open stond (gemeten, geen schatting). Alles blijft op het toestel.
 Onder Instellingen (optioneel achter een pincode van 4 cijfers) staan schakelaars voor Reels,
 Verkennen, voorgestelde posts, Stories en "Alleen berichten". De schakelaars passen de regels uit
-`rules.json` in Swift aan (`PlatformRules.applying`); de pincode staat als gezouten hash in
-UserDefaults, dus de app opnieuw installeren zet hem terug. Bij de eerste start toont de app een
-uitleg in vier pagina's.
+`rules.json` in Swift aan (`PlatformRules.applying`).
+
+Strenger zetten gaat direct; een onderdeel openzetten gaat pas in na de bedenktijd (0 tot 72 uur,
+standaard 48). Langer zetten gaat meteen, korter zetten pas na de huidige bedenktijd. Wie iets net
+strenger heeft gezet, kan tien minuten lang direct terug. Schakelaars, bedenktijd, wat in de wacht
+staat en de pincode (gezouten hash) staan in de sleutelhanger van iOS (`StoredState` in
+`Settings.swift`), zodat opnieuw installeren ze niet wist. Een vergeten pincode vervalt na een
+aangevraagde reset: na de bedenktijd, op zijn vroegst na 24 uur. De klok van het toestel telt;
+wie die verzet, kan de bedenktijd omzeilen.
+
+Einde van de feed: staan er onderaan de hoofdfeed vijf verborgen (voorgestelde) posts achter
+elkaar, dan stopt de feed met een eindkaart en kan je niet verder scrollen
+(`feedFilter.endAfterHidden` in `rules.json`, onderdeel 2c in `filter.js`). Niet op de echte site
+gecontroleerd; `window.__SV_state().feedFilter` toont `ended` en `spacer`.
+
+`facebook.com` mag alleen voor inlogpaden in de app openen (`hostPathAllow`); andere
+Facebook-pagina's gaan naar Safari. Laadt de eerste pagina niet, dan toont de app een foutscherm
+met "Opnieuw". Bij de eerste start toont de app een uitleg in vier pagina's.
 
 ## Installeren via TestFlight (zonder Xcode)
 

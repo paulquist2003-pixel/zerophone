@@ -1,10 +1,13 @@
 {
-  "version": 3,
+  "version": 4,
   "platforms": {
     "instagram": {
       "allowedHostSuffixes": ["instagram.com", "facebook.com", "fbcdn.net", "cdninstagram.com"],
+      "hostPathAllow": {
+        "facebook.com": ["/login", "/dialog/", "/oauth", "/oidc/", "/checkpoint", "/two_factor", "/two_step_verification", "/recover", "/cookie/", "/privacy/consent", "/x/", "/v1", "/v2", "/v3", "/instagram/", "/auth"]
+      },
       "allowedPathPrefixes": ["/explore/search/"],
-      "redirects": { "/explore/": "/explore/search/" },
+      "redirects": { "/explore/": "/explore/search/", "/explore/search/keyword/": "/explore/search/" },
       "blockedExactPaths": [],
       "blockedPathPrefixes": ["/reels/", "/explore/"],
       "singleViewPathPattern": "^/([A-Za-z0-9._]+/)?reel/[A-Za-z0-9_-]+/?$",
@@ -23,7 +26,9 @@
       "feedFilter": {
         "feedPaths": ["/"],
         "postSelector": "article, [role='article']",
-        "followTexts": ["Follow", "Volgen"]
+        "followTexts": ["Follow", "Volgen"],
+        "endAfterHidden": 5,
+        "endText": "Je bent bij. Dit waren de posts van de accounts die je volgt."
       },
       "videoGuard": {
         "pagePatterns": ["^/([a-z0-9._]+/)?reel/[a-z0-9_-]+/$"],

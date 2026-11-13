@@ -3,7 +3,7 @@ import SwiftUI
 /// Teksten die zowel de eerste start als de tab Zerophone gebruiken.
 enum ZerophoneTexts {
     static let keeps = ["Je chats en DM's", "Posts en stories van wie je volgt", "Zoeken en profielen", "Een video die een vriend je stuurt"]
-    static let removes = ["Reels en Verkennen", "Voorgestelde posts", "Doorswipen na een gedeelde video", "Automatisch afspelen"]
+    static let removes = ["Reels en Verkennen", "Voorgestelde posts: de feed stopt als je bij bent", "Doorswipen na een gedeelde video", "Automatisch afspelen"]
 
     struct HonestItem: Hashable {
         let icon: String
@@ -14,7 +14,7 @@ enum ZerophoneTexts {
         HonestItem(icon: "bell.slash", text: "Je krijgt geen meldingen van nieuwe berichten. Open Zerophone zelf een paar keer per dag."),
         HonestItem(icon: "person.crop.circle.badge.questionmark", text: "Profielen van accounts die je niet volgt blijven leeg. Dat is met opzet."),
         HonestItem(icon: "globe", text: "Zerophone gebruikt de website van Instagram. Wat de website niet kan, kan Zerophone ook niet."),
-        HonestItem(icon: "clock", text: "De bespaarde tijd is een schatting: een minuut per keer dat Zerophone iets tegenhoudt.")
+        HonestItem(icon: "hourglass", text: "Iets openzetten in de instellingen gaat pas in na een bedenktijd (standaard 48 uur). Strenger zetten gaat direct.")
     ]
 
     static let screenTimeSteps = [
@@ -113,6 +113,7 @@ private struct ScreenTimePage: View {
 
 private struct PinPage: View {
     @ObservedObject private var pin = PinStore.shared
+    @ObservedObject private var settings = ZerophoneSettings.shared
     @State private var showSetup = false
 
     var body: some View {
@@ -120,7 +121,7 @@ private struct PinPage: View {
             VStack(alignment: .leading, spacing: 20) {
                 Text("Pincode op de instellingen")
                     .font(.largeTitle.weight(.bold))
-                Text("In de instellingen kun je Reels, Verkennen en meer weer openzetten. Met een pincode kan dat niet in een zwak moment. Laat bij voorkeur iemand anders de pincode kiezen. Je kunt dit ook later doen.")
+                Text("In de instellingen kun je Reels, Verkennen en meer weer openzetten. Dat gaat pas in na een bedenktijd, en met een pincode kom je er in een zwak moment niet eens bij. Laat bij voorkeur iemand anders de pincode kiezen. Je kunt dit ook later doen.")
                 if pin.hasPin {
                     Label("Pincode is ingesteld", systemImage: "lock.fill")
                         .foregroundStyle(.green)

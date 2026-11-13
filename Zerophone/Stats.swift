@@ -2,13 +2,14 @@ import Foundation
 
 /// Waarom Zerophone iets tegenhield.
 enum StopKind: String, CaseIterable {
-    case reels, explore, swipe, other
+    case reels, explore, swipe, feedEnd, other
 
     var label: String {
         switch self {
         case .reels: return "Reels"
         case .explore: return "Verkennen"
         case .swipe: return "Doorswipen"
+        case .feedEnd: return "Einde van de feed"
         case .other: return "Overig (stories, enz.)"
         }
     }
@@ -28,13 +29,9 @@ struct DayCount: Identifiable {
 }
 
 /// Telt hoe vaak Zerophone iets tegenhield. Alles blijft op het toestel (UserDefaults).
-/// De bespaarde tijd is een schatting: een vaste waarde per tegenhouding, geen meting.
 @MainActor
 final class StatsStore: ObservableObject {
     static let shared = StatsStore()
-
-    /// Aanname voor de schatting van bespaarde tijd.
-    static let minutesPerStop = 1
 
     @Published private(set) var perDay: [String: Int]
     @Published private(set) var perKind: [String: Int]
@@ -49,7 +46,7 @@ final class StatsStore: ObservableObject {
         perKind = defaults.dictionary(forKey: Self.kindKey) as? [String: Int] ?? [:]
     }
 
-    private static func dayString(_ date: Date) -> String {
+    static func dayString(_ date: Date) -> String {
         let c = Calendar.current.dateComponents([.year, .month, .day], from: date)
         return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
     }
@@ -89,8 +86,6 @@ final class StatsStore: ObservableObject {
 
     var weekTotal: Int { lastDays(7).reduce(0) { $0 + $1.count } }
 
-    func estimatedMinutes(for count: Int) -> Int { count * Self.minutesPerStop }
-
     private func trim(now: Date) {
         guard perDay.count > 120,
               let cutoff = Calendar.current.date(byAdding: .day, value: -90, to: now) else { return }
@@ -102,5 +97,64 @@ final class StatsStore: ObservableObject {
         let defaults = UserDefaults.standard
         defaults.set(perDay, forKey: Self.dayKey)
         defaults.set(perKind, forKey: Self.kindKey)
+    }
+}
+
+/// Meet hoe lang Zerophone per dag open staat (app actief op de voorgrond). Een meting, geen
+/// schatting. Alles blijft op het toestel (UserDefaults).
+@MainActor
+final class UsageStore: ObservableObject {
+    static let shared = UsageStore()
+
+    @Published private(set) var secondsPerDay: [String: Double]
+
+    private static let key = "zerophone.usage.secondsPerDay"
+    private var startedAt: Date?
+
+    private init() {
+        secondsPerDay = UserDefaults.standard.dictionary(forKey: Self.key) as? [String: Double] ?? [:]
+    }
+
+    func begin(now: Date = Date()) {
+        if startedAt == nil { startedAt = now }
+    }
+
+    func end(now: Date = Date()) {
+        guard let start = startedAt else { return }
+        startedAt = nil
+        let seconds = now.timeIntervalSince(start)
+        // Een sessie van meer dan zes uur is een klok die verzet is, geen gebruik.
+        guard seconds > 0, seconds < 6 * 3600 else { return }
+        secondsPerDay[StatsStore.dayString(now), default: 0] += seconds
+        if secondsPerDay.count > 120,
+           let cutoff = Calendar.current.date(byAdding: .day, value: -90, to: now) {
+            let limit = StatsStore.dayString(cutoff)
+            secondsPerDay = secondsPerDay.filter { $0.key >= limit }
+        }
+        UserDefaults.standard.set(secondsPerDay, forKey: Self.key)
+    }
+
+    func reset() {
+        secondsPerDay = [:]
+        UserDefaults.standard.removeObject(forKey: Self.key)
+        if startedAt != nil { startedAt = Date() }
+    }
+
+    /// Minuten vandaag, inclusief de sessie die nu loopt.
+    func todayMinutes(now: Date = Date()) -> Int {
+        var seconds = secondsPerDay[StatsStore.dayString(now)] ?? 0
+        if let start = startedAt { seconds += max(0, now.timeIntervalSince(start)) }
+        return Int(seconds / 60)
+    }
+
+    /// Gemiddeld aantal minuten per dag over de laatste zeven dagen, vandaag meegeteld.
+    func weekAverageMinutes(now: Date = Date()) -> Int {
+        var seconds = 0.0
+        for offset in 0..<7 {
+            guard let date = Calendar.current.date(byAdding: .day, value: -offset, to: now) else { continue }
+            seconds += secondsPerDay[StatsStore.dayString(date)] ?? 0
+        }
+        if let start = startedAt { seconds += max(0, now.timeIntervalSince(start)) }
+        return Int(seconds / 60 / 7)
     }
 }

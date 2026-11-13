@@ -14,6 +14,14 @@
   var cfg = window.__SV_CONFIG;
   var env = window.__SV_ENV || {};
   if (!cfg || window.__SV_ACTIVE) return;
+  // Op een host die alleen voor bepaalde paden mag (inloggen via facebook.com) doet het filter
+  // niets: de regels zijn voor de site zelf geschreven. Swift bewaakt daar de paden.
+  if (cfg.hostPathAllow) {
+    var hn = (location.hostname || '').toLowerCase();
+    for (var hs in cfg.hostPathAllow) {
+      if (hn === hs || hn.slice(-(hs.length + 1)) === '.' + hs) return;
+    }
+  }
   window.__SV_ACTIVE = true;
 
   var THROTTLE_MS = 150;       // hooguit zo vaak nieuwe DOM verwerken
@@ -74,7 +82,11 @@
     // Geen grijze flits bij tikken en geen iOS-menu of selectie bij lang drukken op links/knoppen.
     '*{-webkit-tap-highlight-color:transparent!important}',
     'a,img,video,button,[role="button"]{-webkit-touch-callout:none!important}',
-    'a,img,button,[role="button"]{-webkit-user-select:none!important;user-select:none!important}'
+    'a,img,button,[role="button"]{-webkit-user-select:none!important;user-select:none!important}',
+    // Eindkaart van de feed (zie 2c).
+    '#sv-feed-end{position:fixed;left:16px;right:16px;z-index:2147483000;display:none;padding:18px 16px;border-radius:16px;' +
+      'text-align:center;font:600 16px/1.35 -apple-system,system-ui,sans-serif;pointer-events:none;background:#efefef;color:#111}',
+    '@media (prefers-color-scheme:dark){#sv-feed-end{background:#262626;color:#f5f5f5}}'
   ];
   var staticCss = baseCss.concat(cfg.hideSelectors.map(function (s) {
     return s + '{display:none!important}';
@@ -194,6 +206,133 @@
     if (root.closest) { var up = root.closest(sel); if (up && up !== root) checkFeedButton(up); }
   }
 
+  // ---------- 2c. Einde van de feed ----------
+  // Staan er onderaan de feed `endAfterHidden` verborgen posts achter elkaar, dan zijn de posts
+  // van gevolgde accounts op en levert de site alleen nog voorgestelde posts. Die hebben hoogte
+  // nul, dus het laadpunt van de site blijft in beeld en de site blijft ophalen. Daarom:
+  //  - de eerste post van die rij wordt een hoog, onzichtbaar blok: het laadpunt schuift ver weg;
+  //  - verder scrollen dan dat blok kan niet (terugzetten);
+  //  - op die plek staat een eigen eindkaart.
+  // Niet op de echte site gecontroleerd; `__SV_state().feedFilter` laat zien wat er gebeurt.
+
+  var END_SPACER_PX = 6000;  // zo ver schuift het laadpunt van de site naar beneden
+  var END_ROOM_PX = 240;     // ruimte onderaan het scherm voor de eindkaart
+  var END_PROPS = ['visibility', 'pointer-events', 'height', 'min-height', 'overflow'];
+  var endAfter = ff && ff.endAfterHidden > 0 ? ff.endAfterHidden : 0;
+  var feedEnd = { ended: false, el: null, card: null, raf: 0, listening: false };
+
+  // De rij verborgen posts onderaan de feed: de eerste daarvan en het aantal.
+  function trailingHiddenRun() {
+    var posts = document.querySelectorAll(ff.postSelector);
+    var first = null;
+    var count = 0;
+    for (var i = posts.length - 1; i >= 0; i--) {
+      if (!posts[i].hasAttribute('data-sv-hidden')) break;
+      first = posts[i];
+      count++;
+    }
+    return { first: first, count: count };
+  }
+
+  function clearSpacer() {
+    var el = feedEnd.el;
+    feedEnd.el = null;
+    if (!el) return;
+    el.removeAttribute('data-sv-feed-end');
+    END_PROPS.forEach(function (p) { el.style.removeProperty(p); });
+    el.style.setProperty('display', 'none', 'important'); // het blijft een verborgen post
+  }
+
+  function setSpacer(el) {
+    if (feedEnd.el === el) return;
+    clearSpacer();
+    feedEnd.el = el;
+    if (!el) return;
+    el.setAttribute('data-sv-feed-end', '1');
+    var vids = el.getElementsByTagName('video');
+    for (var i = 0; i < vids.length; i++) { try { vids[i].pause(); } catch (e) {} vids[i].muted = true; }
+    var s = el.style;
+    s.setProperty('display', 'block', 'important');
+    s.setProperty('visibility', 'hidden', 'important');
+    s.setProperty('pointer-events', 'none', 'important');
+    s.setProperty('height', END_SPACER_PX + 'px', 'important');
+    s.setProperty('min-height', END_SPACER_PX + 'px', 'important');
+    s.setProperty('overflow', 'hidden', 'important');
+  }
+
+  function hideEndCard() {
+    if (feedEnd.card) feedEnd.card.style.display = 'none';
+  }
+
+  function showEndCard(top) {
+    var c = feedEnd.card;
+    if (!c) {
+      c = document.createElement('div');
+      c.id = 'sv-feed-end';
+      c.setAttribute('role', 'status');
+      c.textContent = ff.endText || '';
+      feedEnd.card = c;
+    }
+    if (!c.isConnected) document.documentElement.appendChild(c);
+    c.style.top = Math.round(top) + 'px';
+    c.style.display = 'block';
+  }
+
+  // Eindkaart op zijn plek zetten en voorkomen dat je de lege ruimte in scrolt.
+  function positionEnd() {
+    var el = feedEnd.el;
+    if (!el || !el.isConnected || !onFeed()) { hideEndCard(); return; }
+    var h = viewportH();
+    var top = el.getBoundingClientRect().top;
+    if (top >= h) { hideEndCard(); return; }
+    var limit = h - END_ROOM_PX;
+    if (top < limit) {
+      var sc = scrollContainerOf(el) || document.scrollingElement || document.documentElement;
+      if (sc && sc.scrollTop > 0) {
+        sc.scrollTop = Math.max(0, sc.scrollTop + (top - limit));
+        top = el.getBoundingClientRect().top;
+      }
+    }
+    showEndCard(Math.max(top + 12, 12));
+  }
+
+  function onEndScroll() {
+    if (feedEnd.raf) return;
+    var run = function () { feedEnd.raf = 0; positionEnd(); };
+    feedEnd.raf = window.requestAnimationFrame ? window.requestAnimationFrame(run) : setTimeout(run, 16);
+  }
+
+  function listenEndScroll(on) {
+    if (feedEnd.listening === on) return;
+    feedEnd.listening = on;
+    document[on ? 'addEventListener' : 'removeEventListener']('scroll', onEndScroll, { capture: true, passive: true });
+  }
+
+  function resetFeedEnd() {
+    clearSpacer();
+    hideEndCard();
+    listenEndScroll(false);
+    feedEnd.ended = false;
+  }
+
+  function updateFeedEnd() {
+    if (!endAfter) return;
+    if (!onFeed()) { hideEndCard(); return; }
+    if (!feedEnd.ended) {
+      var run = trailingHiddenRun();
+      if (run.count < endAfter) return;
+      feedEnd.ended = true;
+      setSpacer(run.first);
+      listenEndScroll(true);
+      post({ type: 'feedEnd' });
+    } else if (!feedEnd.el || !feedEnd.el.isConnected) {
+      // De site heeft het blok uit de pagina gehaald (lange feed): opnieuw aanleggen.
+      feedEnd.el = null;
+      setSpacer(trailingHiddenRun().first);
+    }
+    positionEnd();
+  }
+
   // ---------- 3. Volgpoort ----------
 
   var fg = cfg.followGate || null;
@@ -247,7 +386,8 @@
       setLock(raw);
       if (gate.notified !== raw) {
         gate.notified = raw;
-        post({ type: 'notice', text: fg.message });
+        // Alleen een code: de tekst kiest Swift, zodat een pagina geen eigen tekst kan tonen.
+        post({ type: 'notice', code: 'followGate' });
       }
     } else if (rel === 'followed' || rel === 'self') {
       setLock(null);
@@ -624,7 +764,7 @@
       hasAnchor: !!guard.anchor,
       scrollLocked: !!prot.lockEl,
       masked: prot.masked.length,
-      feedFilter: ff ? { onFeed: onFeed(), hidden: ffHidden, unmatched: ffUnmatched } : null
+      feedFilter: ff ? { onFeed: onFeed(), hidden: ffHidden, unmatched: ffUnmatched, ended: feedEnd.ended, spacer: !!feedEnd.el } : null
     };
   };
 
@@ -670,6 +810,7 @@
       }
     }
     report();
+    updateFeedEnd();
     updateFollowGate();
     maintainProtection();
   }
@@ -688,6 +829,9 @@
     updateFollowGate();
     // Terug op de feed: bestaande posts opnieuw nalopen (Instagram hergebruikt soms de DOM).
     if (onFeed()) applyFeedFilterIn(document.body);
+    // Feed opnieuw opgebouwd (het blok is weg): opnieuw tellen. Anders alleen de kaart bijwerken.
+    if (feedEnd.ended && (!feedEnd.el || !feedEnd.el.isConnected)) resetFeedEnd();
+    updateFeedEnd();
     // Andere pagina: slot en maskers direct eraf, anders blijft bijv. de feed op slot staan.
     if (vg) resetGuardIfMoved();
   }

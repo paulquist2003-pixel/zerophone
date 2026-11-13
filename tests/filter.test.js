@@ -186,7 +186,7 @@ async function testFollowGate() {
   await sleep(350);
   let css = lockText(env);
   check('Volgen-knop: sv-lock gevuld', /display:none!important/.test(css) && /a\[href\*='\/p\/'\]/.test(css), css);
-  check('Volgen-knop: notice met de melding', env.byType('notice').length === 1 && env.byType('notice')[0].text === 'Alleen content van accounts die je volgt', env.messages);
+  check('Volgen-knop: notice met de melding', env.byType('notice').length === 1 && env.byType('notice')[0].code === 'followGate' && !('text' in env.byType('notice')[0]), env.messages);
   check('state: relation stranger en gateLocked gezet', env.w.__SV_state().relation === 'stranger' && env.w.__SV_state().gateLocked === '/alice/', env.w.__SV_state());
   await sleep(200);
   check('notice wordt niet herhaald voor dezelfde pagina', env.byType('notice').length === 1, env.byType('notice').length);
@@ -710,12 +710,13 @@ async function testRulesContract() {
   console.log('\n[rules.json tegenover de Swift-structs]');
   // Verplichte sleutels (niet-optionele Codable-velden); ontbreekt er één, dan faalt het decoderen -> fatalError bij start.
   const platformRequired = ['allowedHostSuffixes', 'allowedPathPrefixes', 'redirects', 'blockedExactPaths', 'blockedPathPrefixes', 'hideSelectors', 'textRules'];
-  const platformOptional = ['singleViewPathPattern', 'feedFilter', 'videoGuard', 'followGate'];
+  const platformOptional = ['singleViewPathPattern', 'feedFilter', 'videoGuard', 'followGate', 'hostPathAllow'];
   const ffKeys = ['feedPaths', 'postSelector', 'followTexts'];
+  const ffOptional = ['endAfterHidden', 'endText'];
   const vgKeys = ['pagePatterns', 'overlayPathPrefixes', 'exemptPathPrefixes'];
   const fgRequired = ['pathPatterns', 'exemptPathPrefixes', 'followTexts', 'followedTexts', 'hidePostLinks', 'hideAlways', 'message'];
   const fgOptional = ['selfSelector'];
-  check('versie is 3', RULES.version === 3, RULES.version);
+  check('versie is 4', RULES.version === 4, RULES.version);
   for (const [name, p] of Object.entries(RULES.platforms)) {
     const missing = platformRequired.filter((k) => !(k in p));
     check(`${name}: alle verplichte sleutels aanwezig`, missing.length === 0, missing);
@@ -729,8 +730,15 @@ async function testRulesContract() {
     }
     if (p.feedFilter) {
       const m = ffKeys.filter((k) => !(k in p.feedFilter));
-      const u = Object.keys(p.feedFilter).filter((k) => !ffKeys.includes(k));
+      const u = Object.keys(p.feedFilter).filter((k) => !ffKeys.concat(ffOptional).includes(k));
       check(`${name}: feedFilter komt overeen met struct`, m.length === 0 && u.length === 0 && Array.isArray(p.feedFilter.feedPaths) && typeof p.feedFilter.postSelector === 'string' && Array.isArray(p.feedFilter.followTexts), { m, u });
+    }
+    if (p.hostPathAllow) {
+      const okMap = Object.entries(p.hostPathAllow).every(([h, list]) => p.allowedHostSuffixes.includes(h) && Array.isArray(list) && list.every((x) => typeof x === 'string' && x.startsWith('/') && x === x.toLowerCase()));
+      check(`${name}: hostPathAllow is host -> padvoorvoegsels (kleine letters) voor toegestane hosts`, okMap, p.hostPathAllow);
+    }
+    if (p.feedFilter && 'endAfterHidden' in p.feedFilter) {
+      check(`${name}: endAfterHidden is een getal en endText een tekst`, Number.isInteger(p.feedFilter.endAfterHidden) && typeof p.feedFilter.endText === 'string');
     }
     if (p.followGate) {
       const m = fgRequired.filter((k) => !(k in p.followGate));
@@ -811,8 +819,120 @@ async function testFeedFilter() {
   dom.window.close();
 }
 
+async function testFeedEnd() {
+  console.log('\n[einde van de feed]');
+  const post = (id, btn) => `<article id="${id}"><header>${btn ? `<div role="button">${btn}</div>` : ''}</header><div>foto</div></article>`;
+  const env = makeEnv({
+    url: 'https://www.instagram.com/',
+    html: '<main id="feed">' + post('f1') + post('f2') + post('s1', 'Volgen') + post('s2', 'Volgen') + post('s3', 'Volgen') + post('s4', 'Volgen') + '</main>',
+  });
+  const { d, w } = env;
+  const feed = d.getElementById('feed');
+  const card = () => d.getElementById('sv-feed-end');
+  await sleep(300);
+  check('4 verborgen posts onderaan: feed nog niet beëindigd', w.__SV_state().feedFilter.ended === false && !card());
+  check('verborgen post is gewoon display:none', d.getElementById('s1').style.display === 'none');
+
+  feed.insertAdjacentHTML('beforeend', post('s5', 'Volgen'));
+  await sleep(350);
+  const s1 = d.getElementById('s1');
+  check('5 verborgen posts onderaan: feed beëindigd', w.__SV_state().feedFilter.ended === true && w.__SV_state().feedFilter.spacer === true, w.__SV_state().feedFilter);
+  check('eerste van de rij is het hoge onzichtbare blok', s1.hasAttribute('data-sv-feed-end') && s1.style.display === 'block' && s1.style.visibility === 'hidden' && s1.style.height === '6000px' && s1.style.getPropertyPriority('height') === 'important', s1.getAttribute('style'));
+  check('de rest van de rij blijft display:none', d.getElementById('s2').style.display === 'none' && d.getElementById('s5').style.display === 'none');
+  check('eindkaart staat in de pagina met de tekst uit de regels', !!card() && card().textContent === RULES.platforms.instagram.feedFilter.endText && card().style.display === 'block', card() && card().outerHTML);
+  check('eindkaart hangt buiten body (niet in de boom van de site)', card().parentElement === d.documentElement);
+  check('precies één feedEnd-bericht', env.byType('feedEnd').length === 1, env.messages);
+  check('css voor de eindkaart aanwezig', /#sv-feed-end\{position:fixed/.test(d.getElementById('sv-style').textContent));
+
+  // Nog meer voorgestelde posts: blijft één blok, geen tweede bericht
+  feed.insertAdjacentHTML('beforeend', post('s6', 'Volgen') + post('s7', 'Volgen'));
+  await sleep(350);
+  check('nieuwe voorgestelde posts: nog steeds één blok en één bericht', d.querySelectorAll('[data-sv-feed-end]').length === 1 && env.byType('feedEnd').length === 1 && d.getElementById('s7').style.display === 'none');
+
+  // Scrollen voorbij het blok wordt teruggezet
+  const se = d.scrollingElement || d.documentElement;
+  let top = 300;                       // blok staat op 300 px van boven, scherm is 800 hoog
+  s1.getBoundingClientRect = () => rect(0, top, 390, 6000);
+  let st = 1000;
+  Object.defineProperty(se, 'scrollTop', { configurable: true, get: () => st, set: (v) => { top += st - v; st = v; } });
+  d.dispatchEvent(new w.Event('scroll'));
+  await sleep(60);
+  check('te ver gescrold: teruggezet tot het blok onderaan het scherm begint', top === 800 - 240 && st === 1000 - 260, { top, st });
+  check('eindkaart staat net onder het begin van het blok', card().style.top === (800 - 240 + 12) + 'px', card().style.top);
+  top = 900;
+  d.dispatchEvent(new w.Event('scroll'));
+  await sleep(60);
+  check('blok nog onder het scherm: eindkaart verborgen', card().style.display === 'none');
+
+  // Weg van de feed: kaart weg. Terug met dezelfde pagina: kaart terug, niet opnieuw geteld.
+  top = 560;
+  env.go('/direct/inbox/');
+  await sleep(50);
+  check('buiten de feed: eindkaart verborgen', card().style.display === 'none');
+  env.go('/');
+  await sleep(50);
+  check('terug op de feed: eindkaart terug, geen tweede bericht', card().style.display === 'block' && env.byType('feedEnd').length === 1);
+
+  // De site haalt het blok uit de pagina (lange feed): een andere verborgen post neemt het over
+  s1.remove();
+  await sleep(350);
+  const s2 = d.getElementById('s2');
+  check('blok verwijderd door de site: volgende verborgen post wordt het blok', s2.hasAttribute('data-sv-feed-end') && s2.style.height === '6000px' && d.querySelectorAll('[data-sv-feed-end]').length === 1, s2.getAttribute('style'));
+
+  // Feed opnieuw opgebouwd na een routewissel: opnieuw tellen
+  env.go('/direct/inbox/');
+  await sleep(50);
+  feed.innerHTML = post('n1') + post('n2', 'Volgen');
+  env.go('/');
+  await sleep(350);
+  check('nieuwe feed met 1 verborgen post: niet beëindigd, geen kaart', w.__SV_state().feedFilter.ended === false && card().style.display === 'none' && d.getElementById('n2').style.display === 'none', w.__SV_state().feedFilter);
+  env.close();
+
+  // Een gevolgde post tussendoor breekt de rij
+  const env2 = makeEnv({
+    url: 'https://www.instagram.com/',
+    html: '<main>' + post('a', 'Volgen') + post('b', 'Volgen') + post('c', 'Volgen') + post('d', 'Volgen') + post('e', 'Volgen') + post('own') + post('g', 'Volgen') + '</main>',
+  });
+  await sleep(300);
+  check('5 verborgen posts maar daarna een gevolgde post: niet beëindigd', env2.w.__SV_state().feedFilter.ended === false && !env2.d.getElementById('sv-feed-end'));
+  env2.close();
+
+  // Zonder endAfterHidden (oude regels) gebeurt er niets
+  const cfg = JSON.parse(JSON.stringify(RULES.platforms.instagram));
+  delete cfg.feedFilter.endAfterHidden;
+  const dom = new JSDOM(`<!doctype html><html><body>${[1, 2, 3, 4, 5, 6].map((i) => post('x' + i, 'Volgen')).join('')}</body></html>`, { url: 'https://www.instagram.com/', runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole: new VirtualConsole() });
+  dom.window.webkit = { messageHandlers: { sv: { postMessage: () => {} } } };
+  dom.window.IntersectionObserver = class { observe() {} unobserve() {} disconnect() {} };
+  dom.window.__SV_CONFIG = cfg;
+  dom.window.__SV_ENV = { lockZoom: false };
+  dom.window.eval(FILTER_JS);
+  await sleep(300);
+  check('zonder endAfterHidden: posts verborgen maar geen einde', dom.window.__SV_state().feedFilter.ended === false && !dom.window.document.getElementById('sv-feed-end') && dom.window.document.getElementById('x6').hasAttribute('data-sv-hidden'));
+  dom.window.close();
+}
+
+async function testRestrictedHost() {
+  console.log('\n[host met alleen toegestane paden (facebook.com)]');
+  const env = makeEnv({ url: 'https://www.facebook.com/watch/', html: '<a id="r" href="/reels/">Reels</a><article><div role="button">Volgen</div></article>' });
+  await sleep(300);
+  check('filter doet niets op facebook.com (Swift bewaakt de paden)', env.w.__SV_state === undefined && env.messages.length === 0 && !env.d.getElementById('sv-style'), env.messages);
+  env.close();
+  const env2 = makeEnv({ url: 'https://m.facebook.com/login.php', html: '' });
+  await sleep(100);
+  check('ook op subdomeinen van facebook.com', env2.w.__SV_state === undefined);
+  env2.close();
+  const env3 = makeEnv({ url: 'https://www.instagram.com/', html: '' });
+  await sleep(100);
+  check('op instagram.com is het filter gewoon actief', typeof env3.w.__SV_state === 'function');
+  check('trefwoordzoeken gaat terug naar het zoekscherm', env3.w.__SV_classify('/explore/search/keyword/').action === 'redirect' && env3.w.__SV_classify('/explore/search/keyword/').to === '/explore/search/');
+  check('het zoekscherm zelf blijft toegestaan', env3.w.__SV_classify('/explore/search/').action === 'allow');
+  env3.close();
+}
+
 (async () => {
   await testRulesContract();
+  await testFeedEnd();
+  await testRestrictedHost();
   await testClassify();
   await testTextRules();
   await testFeedFilter();

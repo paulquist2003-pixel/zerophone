@@ -28,6 +28,11 @@ struct FeedFilter: Codable, Hashable {
     let postSelector: String
     /// Knopteksten die betekenen "je volgt dit account niet".
     let followTexts: [String]
+    /// Zoveel verborgen posts achter elkaar onderaan de feed betekent: de posts van gevolgde
+    /// accounts zijn op. De feed stopt dan met een eindkaart. Ontbreekt dit, dan stopt hij niet.
+    let endAfterHidden: Int?
+    /// Tekst op de eindkaart.
+    let endText: String?
 }
 
 /// Volgpoort (filter.js): op profielen en posts van accounts die je niet volgt
@@ -53,6 +58,10 @@ struct FollowGate: Codable, Hashable {
 struct PlatformRules: Codable {
     /// Hosts die in de app mogen openen; andere links gaan naar Safari.
     let allowedHostSuffixes: [String]
+    /// Hosts uit de lijst hierboven die alleen voor bepaalde paden in de app mogen openen
+    /// (host -> padvoorvoegsels in kleine letters). Bedoeld voor inloggen via facebook.com;
+    /// andere pagina's van zo'n host gaan naar Safari.
+    let hostPathAllow: [String: [String]]?
     /// Uitzonderingen op de blokkades hieronder (bijv. zoeken binnen /explore/).
     let allowedPathPrefixes: [String]
     /// Pad -> pad waar je in plaats daarvan heen gaat.
@@ -93,6 +102,16 @@ struct PlatformRules: Codable {
         guard let host = host?.lowercased() else { return false }
         return allowedHostSuffixes.contains { host == $0 || host.hasSuffix("." + $0) }
     }
+
+    /// Mag dit pad op deze host in de app openen? Alleen hosts in `hostPathAllow` zijn beperkt.
+    func isAllowedPath(host: String?, path: String) -> Bool {
+        guard let host = host?.lowercased(), let restricted = hostPathAllow else { return true }
+        let p = path.lowercased()
+        for (suffix, prefixes) in restricted where host == suffix || host.hasSuffix("." + suffix) {
+            return prefixes.contains { p.hasPrefix($0) }
+        }
+        return true
+    }
 }
 
 extension PlatformRules {
@@ -115,7 +134,7 @@ extension PlatformRules {
         }
         if !s.blockExplore {
             blocked.removeAll { $0 == "/explore/" }
-            redirects.removeValue(forKey: "/explore/")
+            redirects = redirects.filter { !$0.key.hasPrefix("/explore/") }
             hide.removeAll { $0.contains("/explore/") }
         }
         if !s.blockSuggested {
@@ -130,6 +149,7 @@ extension PlatformRules {
         }
 
         return PlatformRules(allowedHostSuffixes: allowedHostSuffixes,
+                             hostPathAllow: hostPathAllow,
                              allowedPathPrefixes: allowedPathPrefixes,
                              redirects: redirects,
                              blockedExactPaths: blockedExactPaths,

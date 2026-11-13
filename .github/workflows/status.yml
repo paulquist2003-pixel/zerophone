@@ -73,3 +73,16 @@ jobs:
                   shown.append(f"{mail[:2]}***" if mail else "?")
               print(f"- {ga['name']} (intern={ga.get('isInternalGroup')}), "
                     f"{len(testers)} tester(s): " + ", ".join(shown))
+              # Gebruik per tester (sessies in de laatste 30 dagen). Zegt of de app nog geopend wordt.
+              try:
+                  names = {t["id"]: (f"{(t['attributes'].get('email') or '?')[:2]}***") for t in testers}
+                  usage = get(f"/betaGroups/{g['id']}/metrics/betaTesterUsages",
+                              **{"period": "P30D", "groupBy": "betaTesters"})
+                  for row in usage.get("data", []):
+                      tid = (row.get("dimensions", {}).get("betaTesters", {}).get("data") or {}).get("id")
+                      for point in row.get("dataPoints", []):
+                          v = point.get("values", {})
+                          print(f"    {names.get(tid, '?')}: {v.get('sessionCount')} sessies, "
+                                f"{v.get('crashCount')} crashes, {v.get('feedbackCount')} feedback (30 dagen)")
+              except Exception as e:
+                  print(f"    (gebruik per tester niet op te vragen: {type(e).__name__})")

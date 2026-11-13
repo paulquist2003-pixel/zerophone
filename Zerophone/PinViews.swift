@@ -83,19 +83,40 @@ struct PinPadView: View {
 /// Vraagt om de pincode voor de instellingen.
 struct PinGateView: View {
     @ObservedObject private var pin = PinStore.shared
+    @ObservedObject private var settings = ZerophoneSettings.shared
     let onUnlock: () -> Void
     @State private var message: String?
+    @State private var confirmReset = false
 
     var body: some View {
-        PinPadView(title: "Pincode voor de instellingen", message: message) { code in
-            switch pin.verify(code) {
-            case .ok:
-                onUnlock()
-            case .wrong(let left):
-                message = "Onjuiste pincode. Nog \(left) \(left == 1 ? "poging" : "pogingen")."
-            case .locked(let seconds):
-                message = "Te veel pogingen. Probeer het over \(seconds) seconden opnieuw."
+        VStack(spacing: 0) {
+            PinPadView(title: "Pincode voor de instellingen", message: message) { code in
+                switch pin.verify(code) {
+                case .ok:
+                    settings.cancelPinReset()   // de pincode is dus niet vergeten
+                    onUnlock()
+                case .wrong(let left):
+                    message = "Onjuiste pincode. Nog \(left) \(left == 1 ? "poging" : "pogingen")."
+                case .locked(let seconds):
+                    message = "Te veel pogingen. Probeer het over \(seconds) seconden opnieuw."
+                }
             }
+            if let date = settings.pinResetDate {
+                Text("De pincode vervalt op \(date.formatted(date: .abbreviated, time: .shortened)).")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Button("Verzoek intrekken") { settings.cancelPinReset() }
+                    .font(.footnote)
+                    .padding(.vertical, 12)
+            } else {
+                Button("Pincode vergeten?") { confirmReset = true }
+                    .font(.footnote)
+                    .padding(.vertical, 12)
+            }
+        }
+        .confirmationDialog("De pincode vervalt over \(settings.pinResetHours) uur. Tot die tijd blijven de instellingen op slot.",
+                            isPresented: $confirmReset, titleVisibility: .visible) {
+            Button("Reset aanvragen") { settings.requestPinReset() }
         }
     }
 }

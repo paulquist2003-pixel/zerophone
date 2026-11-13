@@ -5,7 +5,8 @@ import Charts
 /// en de uitleg om terug te lezen.
 struct ZerophoneTab: View {
     @ObservedObject private var stats = StatsStore.shared
-    @ObservedObject private var pin = PinStore.shared
+    @ObservedObject private var usage = UsageStore.shared
+    @ObservedObject private var settings = ZerophoneSettings.shared
     @State private var showSettings = false
     private let feedbackURL = URL(string: "mailto:paulquist2003@gmail.com?subject=Zerophone%20feedback")!
 
@@ -16,7 +17,6 @@ struct ZerophoneTab: View {
                     StatRow(title: "Vandaag", value: "\(stats.today)")
                     StatRow(title: "Laatste 7 dagen", value: "\(stats.weekTotal)")
                     StatRow(title: "Totaal", value: "\(stats.total)")
-                    StatRow(title: "Geschat bespaard", value: Self.duration(stats.estimatedMinutes(for: stats.total)))
 
                     if stats.weekTotal > 0 {
                         Chart(stats.lastDays(7)) { day in
@@ -35,14 +35,21 @@ struct ZerophoneTab: View {
                 }
 
                 Section {
+                    StatRow(title: "Vandaag", value: Self.duration(usage.todayMinutes()))
+                    StatRow(title: "Gemiddeld per dag (7 dagen)", value: Self.duration(usage.weekAverageMinutes()))
+                } header: {
+                    Text("Tijd in Zerophone")
+                } footer: {
+                    Text("Gemeten op dit toestel, terwijl Zerophone open staat. Vergelijk het met wat Schermtijd voor de Instagram-app liet zien.")
+                }
+
+                Section {
                     Button {
                         showSettings = true
                     } label: {
-                        Label(pin.hasPin ? "Instellingen (met pincode)" : "Instellingen",
-                              systemImage: pin.hasPin ? "lock.fill" : "gearshape")
+                        Label(settings.hasPin ? "Instellingen (met pincode)" : "Instellingen",
+                              systemImage: settings.hasPin ? "lock.fill" : "gearshape")
                     }
-                } footer: {
-                    Text("Schermtijd-schatting: een minuut per keer dat Zerophone iets tegenhoudt. Dat is een aanname, geen meting.")
                 }
 
                 Section("Zerophone") {

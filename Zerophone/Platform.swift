@@ -51,7 +51,9 @@ enum Platform: String, CaseIterable, Identifiable {
     /// Wordt achter de standaard WKWebView-user agent geplakt, zodat sites ons als
     /// mobiele Safari herkennen in plaats van als "kale" in-app browser.
     var applicationNameForUserAgent: String {
-        "Version/18.0 Mobile/15E148 Safari/604.1"
+        // Zelfde versie als Safari op dit toestel, in plaats van een vast getal dat veroudert.
+        let v = ProcessInfo.processInfo.operatingSystemVersion
+        return "Version/\(v.majorVersion).\(v.minorVersion) Mobile/15E148 Safari/604.1"
     }
 
     /// Melding bij een geblokkeerd pad; specifieker dan `blockMessage` waar dat kan.
