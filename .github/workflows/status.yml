@@ -62,5 +62,14 @@ jobs:
           for g in groups:
               ga = g["attributes"]
               testers = get(f"/betaGroups/{g['id']}/betaTesters")["data"]
-              print(f"- {ga['name']} (intern={ga.get('isInternalGroup')}), testers: "
-                    + ", ".join(t["attributes"].get("email") or "?" for t in testers))
+              # De repo is openbaar, dus ook dit log. E-mailadressen nooit voluit tonen:
+              # eerst als geheim aanmelden (vangnet), daarna alleen een afgekorte vorm afdrukken.
+              shown = []
+              for t in testers:
+                  mail = (t["attributes"].get("email") or "").strip()
+                  if mail:
+                      print(f"::add-mask::{mail}")
+                      print(f"::add-mask::{mail.lower()}")
+                  shown.append(f"{mail[:2]}***" if mail else "?")
+              print(f"- {ga['name']} (intern={ga.get('isInternalGroup')}), "
+                    f"{len(testers)} tester(s): " + ", ".join(shown))
