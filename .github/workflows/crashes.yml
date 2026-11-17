@@ -46,9 +46,10 @@ jobs:
                   return None
               return r.json()
 
-          app_id = get("/apps", **{"filter[bundleId]": "nl.paulquist.zerophone"})["data"][0]["id"]
-          builds = {b["id"]: b["attributes"]["version"] for b in
-                    get("/builds", **{"filter[app]": app_id, "limit": 20})["data"]}
+          # Vast app-ID (Zerophone); het zoeken op bundle-ID gaf op 17-11 steeds HTTP 500.
+          app_id = "6830583262"
+          bl = get("/builds", **{"filter[app]": app_id, "limit": 20}) or {"data": []}
+          builds = {b["id"]: b["attributes"]["version"] for b in bl["data"]}
 
           subs = get(f"/apps/{app_id}/betaFeedbackCrashSubmissions", limit=20,
                      **{"sort": "-createdDate"}) or {"data": []}
