@@ -77,9 +77,9 @@ final class WebViewStore: NSObject, ObservableObject {
 
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsLinkPreview = false
-        // Geen balk met pijltjes en "Gereed" boven het toetsenbord (typisch browser) en het
-        // toetsenbord wegvegen zoals in Berichten.
-        webView.zp_hideInputAccessoryBar()
+        // Toetsenbord wegvegen zoals in Berichten. (De balk boven het toetsenbord weghalen met een
+        // runtime-subklasse van WKContentView is in build 10 geprobeerd en weer verwijderd:
+        // vermoedelijke oorzaak van crashes op iOS 27.)
         webView.scrollView.keyboardDismissMode = .interactive
         if let ua = platform.customUserAgent {
             webView.customUserAgent = ua
