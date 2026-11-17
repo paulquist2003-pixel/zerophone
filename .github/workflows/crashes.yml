@@ -1,0 +1,68 @@
+# Haalt crashmeldingen van TestFlight op (wat testers na een crash via TestFlight delen),
+# met het crashlog. Wijzigt niets. E-mailadressen van testers worden niet getoond.
+name: Crashrapporten
+
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore: [main]
+    paths: ['.github/workflows/crashes.yml']
+
+jobs:
+  crashes:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Python-pakketten installeren
+        run: pip install --quiet pyjwt cryptography requests
+
+      - name: Crashrapporten opvragen
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        shell: python
+        run: |
+          import os, re, time, jwt, requests
+
+          token = jwt.encode(
+              {"iss": os.environ["ASC_ISSUER_ID"], "iat": int(time.time()),
+               "exp": int(time.time()) + 900, "aud": "appstoreconnect-v1"},
+              os.environ["ASC_KEY_P8"], algorithm="ES256",
+              headers={"kid": os.environ["ASC_KEY_ID"], "typ": "JWT"})
+          H = {"Authorization": f"Bearer {token}"}
+          API = "https://api.appstoreconnect.apple.com/v1"
+          MAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+")
+
+          def get(path, tries=3, **params):
+              for i in range(tries):
+                  r = requests.get(path if path.startswith("http") else API + path,
+                                   headers=H, params=params, timeout=60)
+                  if r.status_code < 500:
+                      break
+                  print(f"Apple gaf {r.status_code}, opnieuw over 20 s")
+                  time.sleep(20)
+              if r.status_code >= 400:
+                  print(f"FOUT {r.status_code} bij {path}: {MAIL.sub('<mail>', r.text[:800])}")
+                  return None
+              return r.json()
+
+          app_id = get("/apps", **{"filter[bundleId]": "nl.paulquist.zerophone"})["data"][0]["id"]
+          builds = {b["id"]: b["attributes"]["version"] for b in
+                    get("/builds", **{"filter[app]": app_id, "limit": 20})["data"]}
+
+          subs = get(f"/apps/{app_id}/betaFeedbackCrashSubmissions", limit=20,
+                     **{"sort": "-createdDate"}) or {"data": []}
+          print(f"Crashmeldingen via TestFlight: {len(subs['data'])}\n")
+          for s in subs["data"]:
+              a = s["attributes"]
+              b = (s.get("relationships", {}).get("build", {}).get("data") or {}).get("id")
+              print("=" * 70)
+              print(f"{a.get('createdDate')}  build={builds.get(b, '?')}  "
+                    f"toestel={a.get('deviceModel')}  iOS={a.get('osVersion')}  "
+                    f"geheugen-vrij={a.get('deviceFreeMemory')}  batterij={a.get('batteryPercentage')}")
+              if a.get("comment"):
+                  print("Opmerking: " + MAIL.sub("<mail>", a["comment"]))
+              log = get(f"/betaFeedbackCrashSubmissions/{s['id']}/crashLog")
+              text = ((log or {}).get("data") or {}).get("attributes", {}).get("logText") or ""
+              text = MAIL.sub("<mail>", text)
+              print(text[:12000] if text else "(geen crashlog)")
