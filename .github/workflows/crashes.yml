@@ -35,13 +35,22 @@ jobs:
 
           def get(path, tries=8, **params):
               for i in range(tries):  # Apple gaf op 17-11 vaak tijdelijk HTTP 500
-                  r = requests.get(path if path.startswith("http") else API + path,
-                                   headers=H, params=params, timeout=60)
+                  try:
+                      r = requests.get(path if path.startswith("http") else API + path,
+                                       headers=H, params=params, timeout=60)
+                  except requests.RequestException as e:
+                      print(f"Geen antwoord van Apple ({type(e).__name__}), opnieuw over 15 s")
+                      time.sleep(15)
+                      r = None
+                      continue
                   # Op 17-11 gaf Apple wisselend 500 en 404 voor bestaande gegevens: ook 404 herhalen.
                   if r.status_code < 400 or (r.status_code < 500 and r.status_code != 404):
                       break
                   print(f"Apple gaf {r.status_code}, opnieuw over 15 s")
                   time.sleep(15)
+              if r is None:
+                  print(f"FOUT geen antwoord bij {path}")
+                  return None
               if r.status_code >= 400:
                   print(f"FOUT {r.status_code} bij {path}: {MAIL.sub('<mail>', r.text[:800])}")
                   return None
