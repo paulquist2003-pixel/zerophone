@@ -72,7 +72,15 @@ jobs:
                     f"geheugen-vrij={a.get('deviceFreeMemory')}  batterij={a.get('batteryPercentage')}")
               if a.get("comment"):
                   print("Opmerking: " + MAIL.sub("<mail>", a["comment"]))
-              log = get(f"/betaFeedbackCrashSubmissions/{s['id']}/crashLog")
-              text = ((log or {}).get("data") or {}).get("attributes", {}).get("logText") or ""
+              log = get(f"/betaFeedbackCrashSubmissions/{s['id']}/crashLog", tries=2)
+              if log is None:
+                  link = get(f"/betaFeedbackCrashSubmissions/{s['id']}/relationships/crashLog", tries=2)
+                  cid = ((link or {}).get("data") or {}).get("id")
+                  print(f"crashlog-id: {cid}")
+                  if cid:
+                      log = get(f"/betaCrashLogs/{cid}", tries=2)
+              attrs = ((log or {}).get("data") or {}).get("attributes", {})
+              print("velden crashlog: " + ", ".join(sorted(attrs)))
+              text = attrs.get("logText") or ""
               text = MAIL.sub("<mail>", text)
               print(text[:12000] if text else "(geen crashlog)")
