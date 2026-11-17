@@ -1,5 +1,5 @@
 # Haalt crashmeldingen van TestFlight op (wat testers na een crash via TestFlight delen),
-# met het crashlog. Wijzigt niets. E-mailadressen van testers worden niet getoond.
+# met het crashlog. Wijzigt niets. (Start: push van dit bestand op een branch.) E-mailadressen van testers worden niet getoond.
 name: Crashrapporten
 
 on:
