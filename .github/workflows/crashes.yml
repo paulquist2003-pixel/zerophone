@@ -1,0 +1,96 @@
+# Haalt crashmeldingen van TestFlight op (wat testers na een crash via TestFlight delen),
+# met het crashlog. Wijzigt niets. (Start: push van dit bestand op een branch.) E-mailadressen van testers worden niet getoond.
+name: Crashrapporten
+
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore: [main]
+    paths: ['.github/workflows/crashes.yml']
+
+jobs:
+  crashes:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Python-pakketten installeren
+        run: pip install --quiet pyjwt cryptography requests
+
+      - name: Crashrapporten opvragen
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        shell: python
+        run: |
+          import os, re, time, jwt, requests
+
+          token = jwt.encode(
+              {"iss": os.environ["ASC_ISSUER_ID"], "iat": int(time.time()),
+               "exp": int(time.time()) + 900, "aud": "appstoreconnect-v1"},
+              os.environ["ASC_KEY_P8"], algorithm="ES256",
+              headers={"kid": os.environ["ASC_KEY_ID"], "typ": "JWT"})
+          H = {"Authorization": f"Bearer {token}"}
+          API = "https://api.appstoreconnect.apple.com/v1"
+          MAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+")
+
+          def get(path, tries=8, **params):
+              for i in range(tries):  # Apple gaf op 17-11 vaak tijdelijk HTTP 500
+                  try:
+                      r = requests.get(path if path.startswith("http") else API + path,
+                                       headers=H, params=params, timeout=60)
+                  except requests.RequestException as e:
+                      print(f"Geen antwoord van Apple ({type(e).__name__}), opnieuw over 15 s")
+                      time.sleep(15)
+                      r = None
+                      continue
+                  # Op 17-11 gaf Apple wisselend 500 en 404 voor bestaande gegevens: ook 404 herhalen.
+                  if r.status_code < 400 or (r.status_code < 500 and r.status_code != 404):
+                      break
+                  print(f"Apple gaf {r.status_code}, opnieuw over 15 s")
+                  time.sleep(15)
+              if r is None:
+                  print(f"FOUT geen antwoord bij {path}")
+                  return None
+              if r.status_code >= 400:
+                  print(f"FOUT {r.status_code} bij {path}: {MAIL.sub('<mail>', r.text[:800])}")
+                  return None
+              return r.json()
+
+          # Vast app-ID (Zerophone); het zoeken op bundle-ID gaf op 17-11 steeds HTTP 500.
+          app_id = "6830583262"
+          bl = get("/builds", **{"filter[app]": app_id, "limit": 20}) or {"data": []}
+          builds = {b["id"]: b["attributes"]["version"] for b in bl["data"]}
+
+          found = get("/apps", **{"filter[bundleId]": "nl.paulquist.zerophone"})
+          if found and found.get("data"):
+              app_id = found["data"][0]["id"]
+          print(f"App-ID: {app_id}")
+          subs = get(f"/apps/{app_id}/betaFeedbackCrashSubmissions", limit=20)
+          if subs is None:
+              ids = get(f"/apps/{app_id}/relationships/betaFeedbackCrashSubmissions", limit=20)
+              subs = {"data": []}
+              for ref in (ids or {}).get("data", []):
+                  one = get(f"/betaFeedbackCrashSubmissions/{ref['id']}")
+                  if one: subs["data"].append(one["data"])
+          print(f"Crashmeldingen via TestFlight: {len(subs['data'])}\n")
+          for s in subs["data"]:
+              a = s["attributes"]
+              b = (s.get("relationships", {}).get("build", {}).get("data") or {}).get("id")
+              print("=" * 70)
+              print(f"{a.get('createdDate')}  build={builds.get(b, '?')}  "
+                    f"toestel={a.get('deviceModel')}  iOS={a.get('osVersion')}  "
+                    f"geheugen-vrij={a.get('deviceFreeMemory')}  batterij={a.get('batteryPercentage')}")
+              if a.get("comment"):
+                  print("Opmerking: " + MAIL.sub("<mail>", a["comment"]))
+              log = get(f"/betaFeedbackCrashSubmissions/{s['id']}/crashLog")
+              if log is None:
+                  link = get(f"/betaFeedbackCrashSubmissions/{s['id']}/relationships/crashLog", tries=2)
+                  cid = ((link or {}).get("data") or {}).get("id")
+                  print(f"crashlog-id: {cid}")
+                  if cid:
+                      log = get(f"/betaCrashLogs/{cid}", tries=2)
+              attrs = ((log or {}).get("data") or {}).get("attributes", {})
+              print("velden crashlog: " + ", ".join(sorted(attrs)))
+              text = attrs.get("logText") or ""
+              text = MAIL.sub("<mail>", text)
+              print(text[:12000] if text else "(geen crashlog)")

@@ -929,7 +929,41 @@ async function testRestrictedHost() {
   env3.close();
 }
 
+async function testReady() {
+  console.log('\n[klaar-signaal voor het laadscherm]');
+  // Alleen het opstartscherm van de site: nog niet klaar.
+  const env = makeEnv({ url: 'https://www.instagram.com/', html: '<div id="splash"><svg></svg></div>' });
+  await sleep(250);
+  check('alleen een opstartscherm: nog geen ready', env.byType('ready').length === 0 && env.w.__SV_state().ready === false, env.messages);
+  const nav = env.d.createElement('nav');
+  nav.innerHTML = '<a href="/">Home</a>';
+  env.d.body.appendChild(nav);
+  await sleep(250);
+  check('navigatie verschijnt: één ready', env.byType('ready').length === 1 && env.w.__SV_state().ready === true, env.messages);
+  const main = env.d.createElement('main');
+  env.d.body.appendChild(main);
+  await sleep(250);
+  check('meer inhoud daarna: geen tweede ready', env.byType('ready').length === 1);
+  env.close();
+
+  // Inlogscherm (niet ingelogd): het formulier telt als inhoud.
+  const env2 = makeEnv({ url: 'https://www.instagram.com/accounts/login/', html: '<div><form><input name="username"></form></div>' });
+  await sleep(250);
+  check('inlogformulier: ready', env2.byType('ready').length === 1, env2.messages);
+  env2.close();
+
+  // Niets herkenbaars: na het load-event alsnog ready (vangnet).
+  const env3 = makeEnv({ url: 'https://www.instagram.com/', html: '<div id="root"></div>' });
+  await sleep(250);
+  check('geen herkenbare inhoud: nog geen ready', env3.byType('ready').length === 0);
+  env3.w.dispatchEvent(new env3.w.Event('load'));
+  await sleep(1600);
+  check('1,5 s na load alsnog ready', env3.byType('ready').length === 1, env3.messages);
+  env3.close();
+}
+
 (async () => {
+  await testReady();
   await testRulesContract();
   await testFeedEnd();
   await testRestrictedHost();

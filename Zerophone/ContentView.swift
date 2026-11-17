@@ -5,7 +5,7 @@ import WebKit
 /// Op dit moment alleen Instagram; Snapchat staat klaar in Platform.swift en de regels
 /// (zie docs/snapchat-later.md), maar wordt niet getoond of geladen.
 struct ContentView: View {
-    @StateObject private var instagram = WebViewStore(platform: .instagram)
+    @ObservedObject private var instagram = WebViewStore.instagram
     @ObservedObject private var rulesStore = RulesStore.shared
     @ObservedObject private var settings = ZerophoneSettings.shared
     @Environment(\.scenePhase) private var scenePhase
@@ -29,6 +29,7 @@ struct ContentView: View {
                 settings.applyDue()            // wat in de wacht stond en aan de beurt is
                 UsageStore.shared.begin()
             } else {
+                if phase == .inactive { instagram.captureSnapshot() }
                 UsageStore.shared.end()
             }
         }
@@ -49,15 +50,15 @@ struct PlatformScreen: View {
             WebViewContainer(webView: store.webView)
             if let error = store.loadErrorText {
                 LoadErrorView(text: error) { store.retry() }
-            } else if !store.hasCommittedPage {
-                ProgressView("\(store.platform.displayName) laden")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color(.systemBackground))
+            } else if !store.isReady {
+                StartupView(snapshot: store.resumeSnapshot)
+                    .transition(.opacity)
             }
         }
+        .animation(.easeOut(duration: 0.2), value: store.isReady)
         .overlay(alignment: .top) {
             VStack(spacing: 0) {
-                if store.isLoading && store.hasCommittedPage && store.loadErrorText == nil {
+                if store.isLoading && store.isReady && store.loadErrorText == nil {
                     ProgressView(value: min(max(store.progress, 0), 1))
                         .progressViewStyle(.linear)
                 }
@@ -76,6 +77,39 @@ struct PlatformScreen: View {
         }
         .animation(.easeInOut(duration: 0.2), value: store.bannerText)
         .onAppear { store.loadIfNeeded() }   // een tab laadt pas als je hem opent
+    }
+}
+
+/// Eigen laadscherm tot de site echt iets toont. Na een herstart van het webproces staat de
+/// laatste schermafdruk erin, zodat je niet naar een leeg scherm kijkt.
+struct StartupView: View {
+    let snapshot: UIImage?
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            Color(.systemBackground)
+            if let snapshot {
+                Image(uiImage: snapshot)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .clipped()
+                ProgressView()
+                    .padding(10)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .padding(.top, 12)
+            } else {
+                VStack(spacing: 18) {
+                    Image(systemName: "circle.slash")
+                        .font(.system(size: 44, weight: .light))
+                        .foregroundStyle(.secondary)
+                    ProgressView()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Instagram laden")
     }
 }
 

@@ -9,6 +9,7 @@
 //  4. Videobewaking: in een reelviewer mag één video, doorswipen niet
 //     4b. Afscherming: scrollslot en maskeren, zodat de volgende video niet eens in beeld komt
 //  5. Routes en klikken op geblokkeerde links doorgeven aan Swift
+//  6. Klaar-signaal: Swift houdt het eigen laadscherm vast tot de site echt iets toont
 (function () {
   'use strict';
   var cfg = window.__SV_CONFIG;
@@ -764,9 +765,33 @@
       hasAnchor: !!guard.anchor,
       scrollLocked: !!prot.lockEl,
       masked: prot.masked.length,
+      ready: readySent,
       feedFilter: ff ? { onFeed: onFeed(), hidden: ffHidden, unmatched: ffUnmatched, ended: feedEnd.ended, spacer: !!feedEnd.el } : null
     };
   };
+
+  // ---------- 6. Klaar-signaal ----------
+  // Na het laden van de HTML toont de site eerst nog een eigen opstartscherm, terwijl haar
+  // JavaScript laadt. Swift laat zijn eigen laadscherm staan tot hier 'ready' komt: zodra er
+  // echte inhoud is (navigatie, hoofdinhoud, een post of het inlogformulier), of uiterlijk
+  // READY_AFTER_LOAD_MS na het load-event. Welke elementen Instagram gebruikt, is niet op de
+  // echte site gecontroleerd; Swift heeft daarom ook een eigen maximum.
+
+  var READY_SELECTOR = 'main,nav,[role="main"],[role="navigation"],article,form';
+  var READY_AFTER_LOAD_MS = 1500;
+  var readySent = false;
+
+  function sendReady() {
+    if (readySent) return;
+    readySent = true;
+    post({ type: 'ready' });
+  }
+
+  function checkReady() {
+    if (!readySent && document.body && document.body.querySelector(READY_SELECTOR)) sendReady();
+  }
+
+  window.addEventListener('load', function () { setTimeout(sendReady, READY_AFTER_LOAD_MS); });
 
   // ---------- verwerking van DOM-wijzigingen ----------
 
@@ -810,6 +835,7 @@
       }
     }
     report();
+    checkReady();
     updateFeedEnd();
     updateFollowGate();
     maintainProtection();

@@ -10,6 +10,14 @@ import WebKit
 final class WebViewStore: NSObject, ObservableObject {
     static let swipeBlockedText = "Eén video bekijken mag, doorswipen niet"
 
+    /// De enige webview van de app. Wordt al bij de start van de app gemaakt en begint dan
+    /// meteen te laden (zie ZerophoneApp), zodat Instagram er sneller staat.
+    static let instagram = WebViewStore(platform: .instagram)
+
+    /// Zo lang blijft het eigen laadscherm hooguit staan na de eerste paginalading, als het
+    /// klaar-signaal uit filter.js niet komt.
+    static let readyFallbackSeconds: Double = 8
+
     let platform: Platform
     let webView: WKWebView
 
@@ -29,6 +37,13 @@ final class WebViewStore: NSObject, ObservableObject {
     @Published private(set) var hasCommittedPage = false
     /// Gezet als de eerste pagina niet laadt; de app toont dan een foutscherm met "Opnieuw".
     @Published private(set) var loadErrorText: String?
+    /// Pas waar als de site echt iets toont (bericht 'ready' uit filter.js, of na een maximum).
+    /// Tot dan staat het eigen laadscherm van Zerophone erover, in plaats van eerst een leeg
+    /// scherm en daarna het opstartscherm van de site.
+    @Published private(set) var isReady = false
+    /// Schermafdruk van vlak voor de app naar de achtergrond ging. Stopt iOS intussen het
+    /// webproces, dan staat deze in beeld tijdens het herladen in plaats van een leeg scherm.
+    @Published private(set) var resumeSnapshot: UIImage?
 
     private var currentRules: PlatformRules?
     private var lastPath = "/"
@@ -41,6 +56,9 @@ final class WebViewStore: NSObject, ObservableObject {
     private var loadingObservation: NSKeyValueObservation?
     private var refreshControl: UIRefreshControl?
     private var refreshTask: Task<Void, Never>?
+    private var readyFallbackTask: Task<Void, Never>?
+    private var lastSnapshot: UIImage?
+    private var reportedStart = false
 
     init(platform: Platform) {
         self.platform = platform
@@ -59,6 +77,10 @@ final class WebViewStore: NSObject, ObservableObject {
 
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsLinkPreview = false
+        // Niet doen (build 10, crash op iOS 27 bij de eerste tik): de klasse van de binnenste view
+        // van de webview (WKContentView) verwisselen om de balk boven het toetsenbord weg te halen,
+        // en keyboardDismissMode op de scrollview. Het crashlog liet een crash zien in de
+        // aanraakverwerking (-[UIGestureRecognizer _delayTouch:forEvent:], nil in een array).
         if let ua = platform.customUserAgent {
             webView.customUserAgent = ua
         }
@@ -104,6 +126,28 @@ final class WebViewStore: NSObject, ObservableObject {
         installScripts(RulesStore.shared.rules)
     }
 
+    /// De site toont echte inhoud: laadscherm weg.
+    private func markReady() {
+        readyFallbackTask?.cancel()
+        readyFallbackTask = nil
+        if !isReady { isReady = true }
+        resumeSnapshot = nil
+        if !reportedStart {
+            reportedStart = true
+            SpeedStore.shared.recordStartReady()
+        }
+    }
+
+    /// Schermafdruk bewaren voor als iOS het webproces stopt terwijl de app weg is.
+    func captureSnapshot() {
+        guard isReady, webView.window != nil, webView.bounds.width > 0 else { return }
+        webView.takeSnapshot(with: nil) { [weak self] image, _ in
+            Task { @MainActor [weak self] in
+                if let image { self?.lastSnapshot = image }
+            }
+        }
+    }
+
     /// Knop "Opnieuw" op het foutscherm.
     func retry() {
         loadErrorText = nil
@@ -141,6 +185,7 @@ final class WebViewStore: NSObject, ObservableObject {
             short = "Laden mislukt"
         }
         if hasCommittedPage {
+            markReady()   // de oude pagina blijft staan; geen laadscherm eroverheen houden
             showBanner(short)
         } else {
             loadErrorText = long
@@ -336,6 +381,8 @@ extension WebViewStore: WKScriptMessageHandler {
             }
         case "feedEnd":
             StatsStore.shared.record(.feedEnd)
+        case "ready":
+            markReady()
         default:
             break
         }
@@ -402,6 +449,14 @@ extension WebViewStore: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         hasCommittedPage = true
         loadErrorText = nil
+        SpeedStore.shared.recordFullLoad()
+        if !isReady && readyFallbackTask == nil {
+            readyFallbackTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(Self.readyFallbackSeconds * 1_000_000_000))
+                guard !Task.isCancelled else { return }
+                self?.markReady()
+            }
+        }
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -420,6 +475,12 @@ extension WebViewStore: WKNavigationDelegate {
 
     /// iOS beëindigt het webproces in de achtergrond; zonder reload blijft het scherm wit.
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        SpeedStore.shared.recordRestart()
+        // Laadscherm terug (met de laatste schermafdruk als die er is) tot de site weer staat.
+        readyFallbackTask?.cancel()
+        readyFallbackTask = nil
+        isReady = false
+        resumeSnapshot = lastSnapshot
         if webView.url != nil {
             webView.reload()
         } else if didLoad {

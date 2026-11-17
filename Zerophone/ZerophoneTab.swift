@@ -7,6 +7,7 @@ struct ZerophoneTab: View {
     @ObservedObject private var stats = StatsStore.shared
     @ObservedObject private var usage = UsageStore.shared
     @ObservedObject private var settings = ZerophoneSettings.shared
+    @ObservedObject private var speed = SpeedStore.shared
     @State private var showSettings = false
     private let feedbackURL = URL(string: "mailto:paulquist2003@gmail.com?subject=Zerophone%20feedback")!
 
@@ -44,6 +45,17 @@ struct ZerophoneTab: View {
                 }
 
                 Section {
+                    StatRow(title: "Instagram klaar na (laatste start)", value: Self.seconds(speed.lastStartSeconds))
+                    StatRow(title: "Mediaan laatste 10 starts", value: Self.seconds(speed.medianStartSeconds))
+                    StatRow(title: "Hele pagina geladen vandaag", value: "\(speed.fullLoadsToday())")
+                    StatRow(title: "Herstart na achtergrond vandaag", value: "\(speed.restartsToday())")
+                } header: {
+                    Text("Snelheid")
+                } footer: {
+                    Text("Voor het testen. Een hele paginalading kost een paar seconden; een herstart betekent dat iOS Instagram uit het geheugen haalde terwijl Zerophone op de achtergrond stond.")
+                }
+
+                Section {
                     Button {
                         showSettings = true
                     } label: {
@@ -78,6 +90,11 @@ struct ZerophoneTab: View {
         .fullScreenCover(isPresented: $showSettings) {
             SettingsGate()
         }
+    }
+
+    private static func seconds(_ value: Double?) -> String {
+        guard let value else { return "nog niet gemeten" }
+        return String(format: "%.1f s", value).replacingOccurrences(of: ".", with: ",")
     }
 
     private static func duration(_ minutes: Int) -> String {

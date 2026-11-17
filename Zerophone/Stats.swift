@@ -158,3 +158,67 @@ final class UsageStore: ObservableObject {
         return Int(seconds / 60 / 7)
     }
 }
+
+/// Meet de snelheid, zodat "het voelt traag" een getal wordt: hoe lang het na de start duurt
+/// voordat Instagram echt in beeld staat, hoe vaak de hele site opnieuw laadt (elke keer
+/// een paar seconden wachten) en hoe vaak iOS het webproces stopte terwijl de app op de
+/// achtergrond stond. Alles blijft op het toestel (UserDefaults).
+@MainActor
+final class SpeedStore: ObservableObject {
+    static let shared = SpeedStore()
+    /// Moment van de start van de app; wordt in ZerophoneApp zo vroeg mogelijk gezet.
+    static var launchedAt = Date()
+
+    @Published private(set) var lastStartSeconds: Double?
+    @Published private(set) var recentStarts: [Double]
+    @Published private(set) var fullLoadsPerDay: [String: Int]
+    @Published private(set) var restartsPerDay: [String: Int]
+
+    private static let startsKey = "zerophone.speed.starts"
+    private static let loadsKey = "zerophone.speed.fullLoadsPerDay"
+    private static let restartsKey = "zerophone.speed.restartsPerDay"
+
+    private init() {
+        let d = UserDefaults.standard
+        recentStarts = d.array(forKey: Self.startsKey) as? [Double] ?? []
+        fullLoadsPerDay = d.dictionary(forKey: Self.loadsKey) as? [String: Int] ?? [:]
+        restartsPerDay = d.dictionary(forKey: Self.restartsKey) as? [String: Int] ?? [:]
+    }
+
+    /// Eén keer per start van de app: Instagram staat in beeld.
+    func recordStartReady(now: Date = Date()) {
+        let seconds = now.timeIntervalSince(Self.launchedAt)
+        guard seconds > 0, seconds < 120 else { return }
+        lastStartSeconds = seconds
+        recentStarts = Array((recentStarts + [seconds]).suffix(10))
+        UserDefaults.standard.set(recentStarts, forKey: Self.startsKey)
+    }
+
+    func recordFullLoad(now: Date = Date()) {
+        bump(&fullLoadsPerDay, key: Self.loadsKey, now: now)
+    }
+
+    func recordRestart(now: Date = Date()) {
+        bump(&restartsPerDay, key: Self.restartsKey, now: now)
+    }
+
+    var medianStartSeconds: Double? {
+        guard !recentStarts.isEmpty else { return nil }
+        let sorted = recentStarts.sorted()
+        return sorted[sorted.count / 2]
+    }
+
+    func fullLoadsToday(now: Date = Date()) -> Int { fullLoadsPerDay[StatsStore.dayString(now)] ?? 0 }
+    func restartsToday(now: Date = Date()) -> Int { restartsPerDay[StatsStore.dayString(now)] ?? 0 }
+
+    private func bump(_ dict: inout [String: Int], key: String, now: Date) {
+        let day = StatsStore.dayString(now)
+        dict[day, default: 0] += 1
+        if dict.count > 30 { dict = dict.filter { $0.key >= Self.cutoffDay(now) } }
+        UserDefaults.standard.set(dict, forKey: key)
+    }
+
+    private static func cutoffDay(_ now: Date) -> String {
+        StatsStore.dayString(Calendar.current.date(byAdding: .day, value: -14, to: now) ?? now)
+    }
+}
