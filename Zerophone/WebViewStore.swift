@@ -77,10 +77,10 @@ final class WebViewStore: NSObject, ObservableObject {
 
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsLinkPreview = false
-        // Toetsenbord wegvegen zoals in Berichten. (De balk boven het toetsenbord weghalen met een
-        // runtime-subklasse van WKContentView is in build 10 geprobeerd en weer verwijderd:
-        // vermoedelijke oorzaak van crashes op iOS 27.)
-        webView.scrollView.keyboardDismissMode = .interactive
+        // Niet doen (build 10, crash op iOS 27 bij de eerste tik): de klasse van de binnenste view
+        // van de webview (WKContentView) verwisselen om de balk boven het toetsenbord weg te halen,
+        // en keyboardDismissMode op de scrollview. Het crashlog liet een crash zien in de
+        // aanraakverwerking (-[UIGestureRecognizer _delayTouch:forEvent:], nil in een array).
         if let ua = platform.customUserAgent {
             webView.customUserAgent = ua
         }
